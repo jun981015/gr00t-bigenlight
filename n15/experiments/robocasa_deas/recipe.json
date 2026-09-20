@@ -1,0 +1,54 @@
+{
+  "name": "deas-robocasa-n15",
+  "upstream_commit": "1bfc846",
+  "tasks": ["CoffeeSetupMug", "PnPMicrowaveToCounter", "TurnOffStove", "PnPCounterToMicrowave"],
+  "assets": {
+    "bc24": {
+      "repo_id": "kimtaey/robocasa_mg_gr00t_100",
+      "repo_type": "dataset",
+      "revision": "7113071da4afbbc13e489661ad457892e4737815",
+      "directory": "datasets/robocasa_mg_gr00t_100"
+    },
+    "offline4": {
+      "repo_id": "changyeon/deas_robocasa",
+      "repo_type": "dataset",
+      "revision": "b929891bd6e18ec5cec46d20e793f78e5d4d0359",
+      "directory": "datasets/deas_robocasa"
+    },
+    "model": {
+      "repo_id": "nvidia/GR00T-N1.5-3B",
+      "repo_type": "model",
+      "revision": "869830fc749c35f34771aa5209f923ac57e4564e",
+      "directory": "models/GR00T-N1.5-3B"
+    }
+  },
+  "training": {
+    "num_gpus": 2,
+    "batch_size": 16,
+    "max_steps": 30000,
+    "save_steps": 5000,
+    "learning_rate": 0.0001,
+    "tune_llm": false,
+    "tune_visual": false,
+    "tune_projector": true,
+    "tune_diffusion_model": true,
+    "embodiment_tag": "new_embodiment",
+    "dataloader_num_workers": 8
+  },
+  "critic": {
+    "critic_action_horizon": 16,
+    "discount1": 0.9,
+    "discount2": 0.99,
+    "expectile": 0.7,
+    "negative_reward": true,
+    "nstep": 1
+  },
+  "recovery": {
+    "first_save_step": 100,
+    "save_interval_seconds": 1800,
+    "max_run_seconds": 28800,
+    "keep_latest_training_state": true
+  },
+  "evaluation": {"num_episodes": 50, "n_envs": 5, "num_samples": 10, "temperature": 0.0},
+  "wandb_project": "gr00t-deas-robocasa"
+}

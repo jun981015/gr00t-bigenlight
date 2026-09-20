@@ -1,0 +1,23 @@
+{
+  "source": "https://arxiv.org/html/2606.08015v4#S5.SS1",
+  "pirl_source": "https://arxiv.org/html/2510.25889#A3.SS1",
+  "note": "Data-budget adaptation to GR00T, not a pi0.5/Q-VGM reproduction. Seed-42 demo IDs are our selection, not the authors' published IDs.",
+  "profiles": {
+    "qvgm-unified": {
+      "suites": ["libero_spatial", "libero_object", "libero_goal", "libero_10"],
+      "demos_per_task": 1,
+      "episodes": 40,
+      "steps": null,
+      "precision": "bf16-mixed",
+      "note": "Q-VGM uses piRL's unified 40-demo checkpoint for Spatial/Object/Goal. Set --steps explicitly: the cited Q-VGM setup does not specify that checkpoint's SFT update count."
+    },
+    "qvgm-long": {
+      "suites": ["libero_10"],
+      "demos_per_task": 5,
+      "episodes": 50,
+      "steps": 400,
+      "precision": "fp32",
+      "note": "Independent Long model initialized from GR00T base, not from the unified checkpoint. 50 demos and 400 FP32 updates match the paper's stated budget, not its architecture/batch/scheduler."
+    }
+  }
+}

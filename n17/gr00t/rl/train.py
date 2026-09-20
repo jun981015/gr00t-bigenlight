@@ -1,0 +1,394 @@
+"""Single-device offline RL entry point. Run python -m gr00t.rl.train --help."""
+
+import argparse
+from dataclasses import asdict
+import hashlib
+import json
+import os
+from pathlib import Path
+import random
+import runpy
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from .adapters import (
+    FrozenGR00TEncoder,
+    Gr00tFlowActor,
+    Gr00tTransitionCollator,
+    StateActionTransitionCollator,
+)
+from .algorithms import FlowBC, SoftValueFlow, SVFConfig
+from .dataset import (
+    ColumnRLAnnotations,
+    DEASRoboCasaAnnotations,
+    EpisodeBatchSampler,
+    LeRobotOfflineRLDataset,
+    OfflineRLConcatDataset,
+)
+from .networks import FeatureCritic, FeatureFlowActor
+from .trainer import OfflineTrainer
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset-path", type=Path, nargs="+", required=True)
+    parser.add_argument(
+        "--output-dir", type=Path, required=True, help="Use your RAID output directory"
+    )
+    parser.add_argument("--backend", choices=("state", "gr00t"), default="state")
+    parser.add_argument("--algorithm", choices=("bc", "svf"), default="svf")
+    parser.add_argument(
+        "--model-path", type=Path, help="GR00T checkpoint already configured for this robot"
+    )
+    parser.add_argument(
+        "--modality-config-path",
+        type=Path,
+        help="Trusted Python file registering NEW_EMBODIMENT (state backend)",
+    )
+    parser.add_argument("--embodiment-tag", default="NEW_EMBODIMENT")
+    parser.add_argument(
+        "--annotation-format", choices=("columns", "deas-robocasa"), default="columns"
+    )
+    parser.add_argument("--reward-column")
+    parser.add_argument("--terminated-column")
+    parser.add_argument("--truncated-column")
+    parser.add_argument("--last-row-is-observation", action="store_true")
+    parser.add_argument(
+        "--bootstrap-on-truncation", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--relative-actions",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="State backend; GR00T always uses checkpoint normalization",
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=1,
+        help="Number of actions actually executed per RL transition",
+    )
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument(
+        "--bootstrap-gamma",
+        type=float,
+        help="Inter-chunk discount; defaults to --gamma. Separate DEAS-style discounts are opt-in",
+    )
+    parser.add_argument(
+        "--steps", type=int, default=1000, help="Total target updates, including resumed updates"
+    )
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--cpu-threads", type=int, default=4)
+    parser.add_argument("--hidden-dim", type=int, default=512)
+    parser.add_argument("--hidden-layers", type=int, default=4)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--flow-steps", type=int, default=10)
+    parser.add_argument("--candidates", type=int, default=8)
+    parser.add_argument("--kappa", type=float, default=1.0)
+    parser.add_argument("--lambda-multiplier", type=float, default=1.0)
+    parser.add_argument("--q-aggregation", choices=("mean", "min"), default="mean")
+    parser.add_argument("--freeze-reference", action="store_true")
+    parser.add_argument("--first-save-step", type=int, default=0)
+    parser.add_argument("--save-interval-seconds", type=float, default=0)
+    parser.add_argument("--max-run-seconds", type=float, default=0)
+    parser.add_argument("--keep-latest-training-state", action="store_true")
+    parser.add_argument("--wandb-project")
+    parser.add_argument(
+        "--save-every",
+        type=int,
+        default=0,
+        help="0: final checkpoint only; full GR00T optimizer checkpoints are large",
+    )
+    parser.add_argument(
+        "--resume", type=Path, help="Trusted local training checkpoint, not an HF model checkpoint"
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.annotation_format == "columns" and args.reward_column is None:
+        raise ValueError("Column annotations require --reward-column")
+    if args.annotation_format == "deas-robocasa" and any(
+        (
+            args.reward_column,
+            args.terminated_column,
+            args.truncated_column,
+            args.last_row_is_observation,
+        )
+    ):
+        raise ValueError("Do not combine the DEAS annotation preset with manual column mappings")
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        raise ValueError(
+            "Offline RL currently supports one process; do not launch independent learners with torchrun"
+        )
+    for key in ("steps", "batch_size", "horizon", "hidden_dim", "hidden_layers", "cpu_threads"):
+        if getattr(args, key) < 1:
+            raise ValueError(f"{key} must be positive")
+    if args.seed < 0 or args.save_every < 0:
+        raise ValueError("seed/save_every must be nonnegative")
+    if args.output_dir.exists() and any(args.output_dir.iterdir()) and args.resume is None:
+        raise FileExistsError("Use a new output directory or explicitly --resume an existing run")
+    if torch.device(args.device).type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA is unavailable; restore the GPU allocation or use --backend state --device cpu"
+        )
+    torch.set_num_threads(args.cpu_threads)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
+    from gr00t.data.dataset.lerobot_episode_loader import LeRobotEpisodeLoader
+    from gr00t.data.embodiment_tags import EmbodimentTag
+    from gr00t.data.state_action.state_action_processor import StateActionProcessor
+
+    tag = EmbodimentTag.resolve(args.embodiment_tag)
+    encoder = None
+    if args.backend == "gr00t":
+        if args.model_path is None:
+            raise ValueError("--backend gr00t requires --model-path")
+        if args.modality_config_path is not None:
+            raise ValueError(
+                "GR00T backend uses checkpoint modality/normalization; do not override with a new config"
+            )
+        from gr00t.policy.gr00t_policy import Gr00tPolicy
+
+        policy = Gr00tPolicy(tag, str(args.model_path), device=args.device)
+        if args.horizon > len(policy.modality_configs["action"].delta_indices):
+            raise ValueError("RL horizon must not exceed the robot's trained action horizon")
+        modalities = policy.modality_configs
+        # Keep Adam trainable weights in FP32; VLM remains frozen BF16.
+        policy.model.action_head.float()
+        policy.model.action_head.set_trainable_parameters(True, True, True)
+        actor = Gr00tFlowActor(policy.model.action_head)
+        encoder = FrozenGR00TEncoder(policy.model)
+        collator = Gr00tTransitionCollator(policy.processor, args.gamma)
+    else:
+        if args.modality_config_path is not None:
+            runpy.run_path(str(args.modality_config_path.resolve()))
+        if tag.value not in MODALITY_CONFIGS:
+            raise ValueError(
+                "Unknown state-backend modality config; provide --modality-config-path"
+            )
+        # State-only path does not decode unused images.
+        modalities = {
+            key: value
+            for key, value in MODALITY_CONFIGS[tag.value].items()
+            if key not in ("video", "mask", "rl_info")
+        }
+
+    loaders = [LeRobotEpisodeLoader(path, modalities) for path in args.dataset_path]
+    labels = (
+        DEASRoboCasaAnnotations()
+        if args.annotation_format == "deas-robocasa"
+        else ColumnRLAnnotations(
+            args.reward_column,
+            args.terminated_column,
+            args.truncated_column,
+            args.last_row_is_observation,
+        )
+    )
+    single_datasets = [
+        LeRobotOfflineRLDataset(
+            loader,
+            tag,
+            labels,
+            horizon=args.horizon,
+            gamma=args.gamma,
+            bootstrap_gamma=args.bootstrap_gamma,
+            bootstrap_on_truncation=args.bootstrap_on_truncation,
+        )
+        for loader in loaders
+    ]
+    dataset = (
+        single_datasets[0] if len(single_datasets) == 1 else OfflineRLConcatDataset(single_datasets)
+    )
+    if args.backend == "state":
+        from gr00t.data.dataset.sharded_mixture_dataset import merge_statistics
+
+        all_stats = [loader.get_dataset_statistics() for loader in loaders]
+        statistics = {
+            modality: merge_statistics(
+                [stats[modality] for stats in all_stats],
+                [len(ds) for ds in single_datasets],
+                is_relative_stats=modality == "relative_action",
+            )
+            for modality in all_stats[0]
+        }
+        normalization = StateActionProcessor(
+            {tag.value: modalities},
+            {tag.value: statistics},
+            use_relative_action=args.relative_actions,
+        )
+        normalization.eval()
+        collator = StateActionTransitionCollator(normalization, {tag.value: modalities}, args.gamma)
+
+    example = collator([dataset[0]])
+    example = encoder(example) if encoder is not None else example.to(args.device)
+    example.validate()
+    shape, feature_dim = (
+        tuple(example.actions.shape[1:]),
+        example.observations["features"].shape[-1],
+    )
+    hidden_dims = (args.hidden_dim,) * args.hidden_layers
+    if args.backend == "state":
+        actor = FeatureFlowActor(feature_dim, shape, hidden_dims).to(args.device)
+    config = SVFConfig(
+        learning_rate=args.learning_rate,
+        flow_steps=args.flow_steps,
+        candidates=args.candidates,
+        kappa=args.kappa,
+        lambda_multiplier=args.lambda_multiplier,
+        q_aggregation=args.q_aggregation,
+        freeze_reference=args.freeze_reference,
+    )
+    if args.algorithm == "bc":
+        algorithm = FlowBC(actor, config)
+    else:
+        algorithm = SoftValueFlow(
+            actor,
+            FeatureCritic(feature_dim, shape, hidden_dims).to(args.device),
+            FeatureCritic(feature_dim, shape, hidden_dims, time_embed_dim=16).to(args.device),
+            config,
+        )
+    semantic_args = {
+        key: value
+        for key, value in vars(args).items()
+        if key
+        not in (
+            "steps",
+            "output_dir",
+            "resume",
+            "save_every",
+            "cpu_threads",
+            "first_save_step",
+            "save_interval_seconds",
+            "max_run_seconds",
+            "keep_latest_training_state",
+            "wandb_project",
+        )
+    }
+    signal_hash = hashlib.sha256()
+    for annotation in dataset.annotations:
+        for values in (annotation.rewards, annotation.terminated, annotation.truncated):
+            signal_hash.update(values.tobytes())
+    normalization_statistics = (
+        policy.processor.state_action_processor.statistics
+        if args.backend == "gr00t"
+        else normalization.statistics
+    )
+    metadata = json.loads(
+        json.dumps(
+            {
+                "args": semantic_args,
+                "normalization": normalization_statistics,
+                "modalities": {key: asdict(value) for key, value in modalities.items()},
+                "episodes": [loader.episodes_metadata for loader in loaders],
+                "rl_signal_sha256": signal_hash.hexdigest(),
+            },
+            default=str,
+        )
+    )
+    trainer = OfflineTrainer(algorithm, args.device, encoder, metadata=metadata)
+    if args.resume is not None:
+        trainer.load_checkpoint(args.resume)
+    if args.steps <= trainer.step:
+        raise ValueError("--steps must exceed the restored update count")
+    manifest = args.output_dir / "run.json"
+    if manifest.exists():
+        with manifest.open() as previous:
+            if json.load(previous).get("metadata") != metadata:
+                raise ValueError("Output run metadata differs; resume into a new output directory")
+    metrics_path = args.output_dir / "metrics.jsonl"
+    if metrics_path.exists():
+        # Appending to a later run after rewinding a checkpoint creates ambiguous
+        # duplicate steps. Fork into a new output directory instead.
+        with metrics_path.open() as previous:
+            for line in previous:
+                if line.strip() and json.loads(line)["step"] > trainer.step:
+                    raise ValueError(
+                        "Output metrics are ahead of checkpoint; use a new output directory"
+                    )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    if not manifest.exists():
+        with manifest.open("x") as output:
+            json.dump(
+                {
+                    "args": vars(args),
+                    "svf_config": asdict(config),
+                    "action_shape": shape,
+                    "feature_dim": feature_dim,
+                    "metadata": metadata,
+                    "fmrl_reference": "7304b615e6f1bbb07d462ea24bf008e8ac019a17",
+                },
+                output,
+                default=str,
+                indent=2,
+            )
+        if args.backend == "gr00t":
+            policy.processor.save_pretrained(args.output_dir / "processor")
+    sampler = EpisodeBatchSampler(
+        dataset, args.batch_size, args.steps - trainer.step, args.seed, trainer.step
+    )
+    batches = DataLoader(
+        dataset,
+        batch_sampler=sampler,
+        collate_fn=collator,
+        num_workers=0,
+        generator=torch.Generator().manual_seed(args.seed),
+    )
+    wandb_run = None
+    if args.wandb_project:
+        import wandb
+
+        from gr00t.experiment.checkpoint_policy import atomic_json
+
+        identity_path = args.output_dir / "wandb_resume.json"
+        if not identity_path.exists():
+            atomic_json(
+                identity_path, {"id": wandb.util.generate_id(), "project": args.wandb_project}
+            )
+        identity = json.loads(identity_path.read_text())
+        if identity["project"] != args.wandb_project:
+            raise ValueError("W&B project differs from the saved run identity")
+        wandb_run = wandb.init(
+            project=identity["project"],
+            id=identity["id"],
+            resume="allow",
+            name=args.output_dir.name,
+            dir=str(args.output_dir),
+            config=vars(args),
+        )
+    completed = False
+    try:
+        trainer.fit(
+            batches,
+            log_path=args.output_dir / "metrics.jsonl",
+            checkpoint_dir=args.output_dir / "checkpoints",
+            save_every=args.save_every,
+            first_save_step=args.first_save_step,
+            save_interval_seconds=args.save_interval_seconds,
+            max_run_seconds=args.max_run_seconds,
+            keep_latest_training_state=args.keep_latest_training_state,
+            metrics_callback=(lambda metrics: wandb_run.log(metrics, step=metrics["step"]))
+            if wandb_run
+            else None,
+        )
+        final = args.output_dir / "checkpoints" / f"step-{trainer.step}.pt"
+        if not final.exists():
+            trainer.save_recovery_checkpoint(
+                final.parent, args.keep_latest_training_state, archive_model=True
+            )
+        completed = True
+    finally:
+        if wandb_run is not None:
+            wandb_run.finish(exit_code=0 if completed else 1)
+
+
+if __name__ == "__main__":
+    main()

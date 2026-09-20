@@ -1,0 +1,28 @@
+# Simulator / RPC client only; GPU model server uses the existing N1.7 env.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.0+cpu
+torchvision==0.24.0+cpu
+numpy==1.26.4
+scipy==1.15.3
+mujoco==3.3.1
+robosuite==1.4.0
+bddl==1.0.1
+gym==0.25.2
+gymnasium==0.29.1
+numba==0.65.1
+llvmlite==0.47.0
+easydict==1.13
+matplotlib==3.9.4
+opencv-python==4.10.0.84
+transformers==4.57.3
+tyro==0.9.17
+pandas==2.2.3
+msgpack==1.1.0
+msgpack-numpy==0.4.8
+pyzmq==27.0.1
+av==15.1.0
+pyyaml==6.0.3
+cloudpickle==3.1.2
+termcolor==3.2.0
+future==1.0.0
+setuptools==80.9.0

@@ -1,0 +1,17 @@
+{
+  "name": "robocasa-n17-svf",
+  "fmrl_reference": "7304b615e6f1bbb07d462ea24bf008e8ac019a17",
+  "deas_reference": "1bfc8464c4d28574cbd2e699342791c7e4d80028",
+  "tasks": ["CoffeeSetupMug", "PnPMicrowaveToCounter", "TurnOffStove", "PnPCounterToMicrowave"],
+  "datasets": {
+    "bc24": {"repo_id": "kimtaey/robocasa_mg_gr00t_100", "revision": "7113071da4afbbc13e489661ad457892e4737815", "directory": "robocasa_mg_gr00t_100"},
+    "offline4": {"repo_id": "changyeon/deas_robocasa", "revision": "b929891bd6e18ec5cec46d20e793f78e5d4d0359", "directory": "deas_robocasa"}
+  },
+  "embodiment": "ROBOCASA_PANDA_OMRON",
+  "horizon": 16,
+  "bc": {"num_gpus": 2, "batch_per_gpu": 16, "steps": 30000, "learning_rate": 0.0001},
+  "svf": {"num_gpus": 1, "batch_size": 1, "steps": 30000, "learning_rate": 0.0003, "gamma": 0.99, "flow_steps": 10, "candidates": 8, "kappa": 1.0, "lambda_multiplier": 1.0, "q_aggregation": "mean"},
+  "annotation_format": "deas-robocasa",
+  "bootstrap_on_truncation": false,
+  "wandb_project": "robocasa-n17-svf"
+}

@@ -1,0 +1,16 @@
+[submodule "n17/external_dependencies/LIBERO"]
+path = n17/external_dependencies/LIBERO
+url = https://github.com/Lifelong-Robot-Learning/LIBERO.git
+
+[submodule "n17/external_dependencies/SimplerEnv"]
+path = n17/external_dependencies/SimplerEnv
+url = https://github.com/squarefk/SimplerEnv.git
+
+[submodule "n17/external_dependencies/robocasa"]
+path = n17/external_dependencies/robocasa
+url = https://github.com/squarefk/robocasa
+
+[submodule "n17/external_dependencies/robocasa-gr1-tabletop-tasks"]
+path = n17/external_dependencies/robocasa-gr1-tabletop-tasks
+url = https://github.com/robocasa/robocasa-gr1-tabletop-tasks
+
