@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run inside the allocated GPU container. Does not stop any existing GPU job.
 set -eo pipefail
-source "$HOME/vla_finetune/activate_gr00t.sh"
-cd "$HOME/vla_finetune/Isaac-GR00T"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/activate_gr00t.sh"
+cd "$GR00T_N17_ROOT"
 nvidia-smi --query-gpu=index,name,memory.used --format=csv
 if [ -z "${CARROT_KEEPALIVE_PIDS:-}" ]; then
     carrot_keepalive_pids=$(python examples/carrot_in_pot/ensure_keepalive.py)

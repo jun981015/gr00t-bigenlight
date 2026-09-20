@@ -9,7 +9,7 @@ source "$DEAS_REPO/../storage_env.sh"
 
 DEAS_ENV="${DEAS_ENV:-$VLA_STORAGE_ROOT/envs/deas-gr00t-n1.5}"
 UV_BIN="${UV_BIN:-$HOME/raid/uv/bin/uv}"
-ROBOCASA_REPO="${ROBOCASA_REPO:-$HOME/vla_finetune/Isaac-GR00T/external_dependencies/robocasa}"
+ROBOCASA_REPO="${ROBOCASA_REPO:-$DEAS_REPO/../n17/external_dependencies/robocasa}"
 ROBO_SUITE_REF="85abee228d1c43ab1939bce33028099945d453b4"
 
 # Keep this list compatible with Python 3.10 and the existing N1.5 torch 2.5.1.

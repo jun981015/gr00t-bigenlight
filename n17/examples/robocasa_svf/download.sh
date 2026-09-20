@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
-source /home/yoon/vla_finetune/activate_gr00t.sh
-cd /home/yoon/vla_finetune/Isaac-GR00T
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/activate_gr00t.sh"
+cd "$GR00T_N17_ROOT"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 mkdir -p "$VLA_STORAGE_ROOT/logs/robocasa-n17-svf"
 exec >> "$VLA_STORAGE_ROOT/logs/robocasa-n17-svf/download.log" 2>&1

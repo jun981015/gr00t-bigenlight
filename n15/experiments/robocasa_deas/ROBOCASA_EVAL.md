@@ -1,6 +1,6 @@
 # DEAS GR00T N1.5 RoboCasa evaluation
 
-The repository is `/home/yoon/vla_finetune/DEAS-Isaac-GR00T`. The evaluation
+The repository is `/home/yoon/vla_finetune/gr00t-bigenlight/n15`. The evaluation
 script is the DEAS N1.5 path in `scripts/eval_policy_robocasa.py`; it uses
 `embodiment_tag=new_embodiment`, `single_panda_gripper_rl_inference`, and an
 action horizon of 16.
@@ -10,7 +10,7 @@ action horizon of 16.
 Run this inside the allocated GPU container, not on the login host:
 
 ```bash
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 bash experiments/robocasa_deas/bootstrap.sh
 bash experiments/robocasa_deas/setup_robocasa.sh
 ```

@@ -30,7 +30,7 @@ CPU PyTorch를 쓰는 것은 **클라이언트의 모델 의존성을 충족하�
 ## 1. 설치 / 호스트에서 가능한 점검
 
 ```bash
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 bash examples/LIBERO/local/setup.sh
 bash examples/LIBERO/local/run.sh doctor
 bash examples/LIBERO/local/run.sh tasks --suite libero_spatial

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
-source /home/yoon/vla_finetune/activate_gr00t.sh
-cd /home/yoon/vla_finetune/Isaac-GR00T
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/activate_gr00t.sh"
+cd "$GR00T_N17_ROOT"
 exec python examples/robocasa_svf/launch.py "$@"

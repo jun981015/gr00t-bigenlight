@@ -12,8 +12,8 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --execute ) ]]; then
     echo 'Only --execute is accepted after the variant; no work has started.' >&2
     exit 2
 fi
-source "$HOME/vla_finetune/activate_gr00t.sh"
-repo="$HOME/vla_finetune/Isaac-GR00T"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/activate_gr00t.sh"
+repo="$GR00T_N17_ROOT"
 export BIGENLIGHT_DATASET_PATH="$VLA_STORAGE_ROOT/datasets/bigenlight_multitask_gr00t${suffix}/n17"
 export BIGENLIGHT_OUTPUT_PATH="$VLA_STORAGE_ROOT/outputs/bigenlight-n17-${variant}-b32-10k-$(date +%Y%m%dT%H%M%S)"
 export WANDB_PROJECT=bigenlight-multitask-gr00t

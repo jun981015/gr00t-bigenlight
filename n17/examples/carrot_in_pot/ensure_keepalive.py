@@ -29,7 +29,7 @@ def main():
     ).splitlines()
     if len(devices) != 2:
         raise SystemExit("This recipe expects exactly two GPUs in the allocated container")
-    script = Path.home() / "vla_finetune/gpu_keepalive.py"
+    script = Path(__file__).resolve().parents[3] / "tools/server/gpu_keepalive.py"
     log_root = Path(os.environ["VLA_STORAGE_ROOT"]) / "logs"
     log_root.mkdir(parents=True, exist_ok=True)
     log_dir = None

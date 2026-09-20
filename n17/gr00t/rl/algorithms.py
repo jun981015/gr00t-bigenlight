@@ -252,6 +252,18 @@ class SoftValueFlow(FlowBC):
         spread = q.std(dim=0, correction=0).mean()
         return (self.config.lambda_multiplier * spread.clamp_min(1e-3)).detach()
 
+    def outer_objective(self, batch, actions):
+        with torch.no_grad():
+            next_actions = self.sample_actions(batch.next_observations, batch.action_mask)
+            next_q = aggregate_heads(
+                self.target_critic(batch.next_observations, next_actions), self.config.q_aggregation
+            )
+            td_target = batch.rewards + batch.discounts * next_q
+        outer_loss = (
+            (self.critic(batch.observations, actions) - td_target.unsqueeze(0)).square().mean()
+        )
+        return outer_loss, td_target
+
     def losses(self, batch):
         batch.validate()
         actions, mask, obs = (
@@ -260,13 +272,7 @@ class SoftValueFlow(FlowBC):
             batch.observations,
         )
         temperature = self.estimate_temperature(batch)
-        with torch.no_grad():
-            next_actions = self.sample_actions(batch.next_observations, mask)
-            next_q = aggregate_heads(
-                self.target_critic(batch.next_observations, next_actions), self.config.q_aggregation
-            )
-            td_target = batch.rewards + batch.discounts * next_q
-        outer_loss = (self.critic(obs, actions) - td_target.unsqueeze(0)).square().mean()
+        outer_loss, td_target = self.outer_objective(batch, actions)
 
         # Independent anchors/draws from temperature estimation.
         inner_time = actions.new_empty(actions.shape[0]).uniform_(self.config.t_min, 1)

@@ -5,7 +5,7 @@ the legacy DEAS critic is unchanged. This implements scalar Q/V learning and
 BC best-of-N inference, not IQL's advantage-weighted actor update.
 
 ```bash
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 # Inspect configuration; add --execute to start after the BC checkpoint is ready.
 bash experiments/robocasa_deas/run_iql_critic_1gpu.sh \
   /raid/yoon/vla_finetune/outputs/deas-n15-filtered-bc-direct-1gpu-b32/checkpoint-5000

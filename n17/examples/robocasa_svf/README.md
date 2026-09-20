@@ -36,7 +36,7 @@ N1.7 입력 디렉터리는 영상/parquet를 **symlink로 재사용**하고 별
 통계 계산은 low-dimensional 열만 읽어서 BC parquet에 포함된 대용량 이미지를 메모리에 모으지 않는다.
 
 ```bash
-cd /home/yoon/vla_finetune/Isaac-GR00T
+cd /home/yoon/vla_finetune/gr00t-bigenlight/n17
 # GPU 불필요. 이미 받은 부분 재사용; HTTP 429는 서버 제한을 존중해 대기 후 재시도.
 bash examples/robocasa_svf/download.sh
 ```

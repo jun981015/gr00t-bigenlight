@@ -1,5 +1,5 @@
 # Usage: source ~/vla_finetune/activate_gr00t.sh
-source "$HOME/vla_finetune/storage_env.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/storage_env.sh"
 
 export UV_PROJECT_ENVIRONMENT="$VLA_STORAGE_ROOT/envs/gr00t-n1.7"
 export TMPDIR="$VLA_STORAGE_ROOT/tmp"

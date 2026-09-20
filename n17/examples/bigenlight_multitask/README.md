@@ -42,11 +42,11 @@ Prepared from pinned Hugging Face revisions (see `prepare.py` / `SOURCE.json`):
 
 ```bash
 source ~/vla_finetune/activate_gr00t.sh
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 python -m examples.bigenlight_multitask.prepare
 python -m examples.bigenlight_multitask.validate
 
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 source experiments/robocasa_deas/activate.sh
 python -m experiments.bigenlight_multitask.validate
 ```
@@ -67,13 +67,13 @@ Choose batch/steps at launch; defaults are not a VRAM capacity benchmark.
 N1.7 dry run (add `--execute` as the first argument when ready):
 
 ```bash
-bash ~/vla_finetune/Isaac-GR00T/examples/bigenlight_multitask/train.sh
+bash ~/vla_finetune/gr00t-bigenlight/n17/examples/bigenlight_multitask/train.sh
 ```
 
 N1.5 dry run (append `--execute` when ready):
 
 ```bash
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 source experiments/robocasa_deas/activate.sh
 python -m experiments.bigenlight_multitask.train \
   --output ~/raid/vla_finetune/outputs/bigenlight-n15-bc
@@ -114,8 +114,8 @@ artifacts are saved by the standard N1.7 pipeline.
 **Preview only** (safe while N1.5 is still training; no GPU queries or W&B calls):
 
 ```bash
-bash ~/vla_finetune/Isaac-GR00T/examples/bigenlight_multitask/run_n17.sh 50per-task
-bash ~/vla_finetune/Isaac-GR00T/examples/bigenlight_multitask/run_n17.sh all
+bash ~/vla_finetune/gr00t-bigenlight/n17/examples/bigenlight_multitask/run_n17.sh 50per-task
+bash ~/vla_finetune/gr00t-bigenlight/n17/examples/bigenlight_multitask/run_n17.sh all
 ```
 
 Later, after the selected GPU is free and inside the allocated container, append
@@ -145,7 +145,7 @@ Reproduce into a new, nonexistent output directory:
 
 ```bash
 source ~/vla_finetune/activate_gr00t.sh
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 python -m examples.bigenlight_multitask.subset --per-task 30 --output /path/to/new/output
 ```
 
@@ -153,7 +153,7 @@ Select it for N1.7 training (dry run; add `--execute` when ready):
 
 ```bash
 BIGENLIGHT_DATASET_PATH=~/raid/vla_finetune/datasets/bigenlight_multitask_gr00t_30per_task/n17 \
-  bash ~/vla_finetune/Isaac-GR00T/examples/bigenlight_multitask/train.sh
+  bash ~/vla_finetune/gr00t-bigenlight/n17/examples/bigenlight_multitask/train.sh
 ```
 
 For the N1.5 command above, add
@@ -161,3 +161,9 @@ For the N1.5 command above, add
 and choose a **new** output directory (do not resume a full-corpus run with different data).
 The CPU validators accept `--dataset-root <subset root>` (N1.7) and
 `--dataset-path <subset root>/n15` (N1.5).
+
+## Frozen N1.7 BC + environment critic-only IQL
+
+See [IQL.md](IQL.md) for the opt-in all-success terminal reward assumption, fully
+frozen BC feature encoder, independent scalar Q/V heads, and single-GPU launch /
+recovery commands. This does not train the actor or the SVF inner critic.

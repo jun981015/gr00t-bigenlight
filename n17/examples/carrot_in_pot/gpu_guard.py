@@ -7,7 +7,15 @@ import subprocess
 
 
 def allowed_keepalives(value, *, proc_root=Path("/proc"), expected_script=None):
-    expected = str(expected_script or (Path.home() / "vla_finetune/gpu_keepalive.py"))
+    expected = (
+        [Path(expected_script)]
+        if expected_script is not None
+        else [
+            Path(__file__).resolve().parents[3] / "tools/server/gpu_keepalive.py",
+            # Explicitly named PIDs of legacy jobs remain recognizable during migration.
+            Path.home() / "vla_finetune/gpu_keepalive.py",
+        ]
+    )
     allowed = set()
     for token in value.split():
         if not token.isdecimal() or int(token) <= 1:
@@ -17,7 +25,7 @@ def allowed_keepalives(value, *, proc_root=Path("/proc"), expected_script=None):
         if process.stat().st_uid != os.getuid():
             raise ValueError(f"Keepalive PID {pid} is not owned by the current user")
         command = (process / "cmdline").read_bytes().split(b"\0")
-        if os.fsencode(expected) not in command:
+        if not any(os.fsencode(path) in command for path in expected):
             raise ValueError(f"PID {pid} is not the expected gpu_keepalive.py process")
         allowed.add(pid)
     return allowed

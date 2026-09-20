@@ -121,6 +121,9 @@ class FrozenGR00TEncoder:
         self.model = model
         model.backbone.requires_grad_(False).eval()
 
+    def pooling_features(self, raw_features):
+        return raw_features.float()
+
     @torch.no_grad()
     def encode_observation(self, inputs):
         self.model.backbone.eval()
@@ -129,7 +132,7 @@ class FrozenGR00TEncoder:
         }
         backbone_inputs, action_inputs = self.model.prepare_input(clean_inputs)
         result = dict(self.model.backbone(backbone_inputs))
-        features = result["backbone_features"].float()
+        features = self.pooling_features(result["backbone_features"])
         valid = result["backbone_attention_mask"].to(features.dtype).unsqueeze(-1)
         pooled = (features * valid).sum(1) / valid.sum(1).clamp_min(1)
         state = action_inputs["state"]
@@ -158,6 +161,25 @@ class FrozenGR00TEncoder:
             processed.current["action"].to(device),
             processed.current["action_mask"].to(device),
         )
+
+
+class FrozenBCGR00TEncoder(FrozenGR00TEncoder):
+    """Fully frozen BC conditioning; LN/attention once, with no feature overwrite.
+
+    Independent Q/V MLPs consume masked pooled conditioning + state + embodiment.
+    The BC DiT is neither called nor included in the critic optimizer.
+    """
+
+    def __init__(self, model):
+        super().__init__(model)
+        model.requires_grad_(False).eval()
+
+    def pooling_features(self, raw_features):
+        self.model.eval()
+        head = self.model.action_head
+        parameter = next(head.vlln.parameters(), None)
+        dtype = parameter.dtype if parameter is not None else raw_features.dtype
+        return head.vl_self_attention(head.vlln(raw_features.to(dtype))).float()
 
 
 class Gr00tFlowActor(nn.Module):

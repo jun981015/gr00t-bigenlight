@@ -29,7 +29,7 @@ HF 저장소와 commit SHA는 `recipe.json`에 고정했다.
 출력 예시는 `outputs/deas-robocasa/`, 다운로드 로그는 `logs/deas-robocasa/download.log`.
 
 ```bash
-cd /home/yoon/vla_finetune/DEAS-Isaac-GR00T
+cd /home/yoon/vla_finetune/gr00t-bigenlight/n15
 bash experiments/robocasa_deas/bootstrap.sh
 source experiments/robocasa_deas/activate.sh
 bash experiments/robocasa_deas/download.sh
@@ -84,7 +84,7 @@ python -m pytest -q tests/test_pyav_frames.py tests/test_trajectory_cache.py
 ### 현재 실행: 24-task BC 생략, N1.5 base에서 바로 filtered BC
 
 ```bash
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 bash experiments/robocasa_deas/run_filtered_bc_direct_1gpu.sh --execute
 # 같은 학습 재개:
 bash experiments/robocasa_deas/run_filtered_bc_direct_1gpu.sh --resume --execute
@@ -101,7 +101,7 @@ W&B online / 로그 50 step / 정규 저장 5,000 step 설정이다.
 ### H200 1 GPU에서 첫 24-task BC
 
 ```bash
-cd ~/vla_finetune/DEAS-Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n15
 bash experiments/robocasa_deas/run_bc24_1gpu.sh --execute
 # 컨테이너 재할당 후 최신 full checkpoint에서 재개:
 bash experiments/robocasa_deas/run_bc24_1gpu.sh --resume --execute

@@ -56,3 +56,11 @@ def test_time_budget_saves_before_stop(tmp_path, monkeypatch):
     )
     assert learner.step == 2
     assert (tmp_path / "step-2.pt").exists()
+
+
+def test_stop_request_saves_after_complete_update(tmp_path):
+    learner = OfflineTrainer(agent())
+    learner.stop_requested = True
+    learner.fit([batch(), batch()], checkpoint_dir=tmp_path, keep_latest_training_state=True)
+    assert learner.step == 1
+    assert (tmp_path / "step-1.pt").exists()

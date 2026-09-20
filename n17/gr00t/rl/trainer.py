@@ -22,6 +22,7 @@ class OfflineTrainer:
         self.algorithm = algorithm
         self.device, self.batch_encoder = device, batch_encoder
         self.step = 0
+        self.stop_requested = False
         self.metadata = deepcopy(metadata)
 
     def update(self, batch):
@@ -60,8 +61,18 @@ class OfflineTrainer:
             path.parent.mkdir(parents=True, exist_ok=True)
             log = path.open("a")
         try:
+            previous_batch_end = time.perf_counter()
             for batch in batches:
+                batch_ready = time.perf_counter()
                 metrics = {"step": self.step + 1, **self.update(batch)}
+                update_end = time.perf_counter()
+                metrics.update(
+                    {
+                        "time/data_wait_s": batch_ready - previous_batch_end,
+                        "time/update_s": update_end - batch_ready,
+                        "time/step_s": update_end - previous_batch_end,
+                    }
+                )
                 print(json.dumps(metrics, allow_nan=False), flush=True)
                 if log is not None:
                     log.write(json.dumps(metrics, allow_nan=False) + "\n")
@@ -69,7 +80,9 @@ class OfflineTrainer:
                 if metrics_callback is not None:
                     metrics_callback(metrics)
                 now = time.monotonic()
-                stop = bool(max_run_seconds and now - started >= max_run_seconds)
+                stop = self.stop_requested or bool(
+                    max_run_seconds and now - started >= max_run_seconds
+                )
                 milestone = bool(save_every and self.step % save_every == 0)
                 save = milestone or stop or self.step == first_save_step
                 save |= bool(save_interval_seconds and now - last_save >= save_interval_seconds)
@@ -80,6 +93,7 @@ class OfflineTrainer:
                     last_save = time.monotonic()
                 if stop:
                     break
+                previous_batch_end = time.perf_counter()
         finally:
             if log is not None:
                 log.close()

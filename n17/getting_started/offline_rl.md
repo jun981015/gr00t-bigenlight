@@ -166,6 +166,12 @@ to sampling a full unmasked 16-step chunk and truncating it afterward.
 
 ## SVF implementation mapping
 
+For policy improvement against the Q learned by our cached IQL runs, see
+[frozen-IQL-Q SVF](../examples/bigenlight_multitask/FIXED_Q_SVF.md). This opt-in mode
+freezes env Q and the BC reference, trains only inner V and the actor, and keeps
+IQL's frozen BC conditioning separate from raw actor tokens. Default SVF below
+is unchanged.
+
 The table follows the function locations in the user's SVF document:
 
 | Reference `qflow_rc.py` | Torch implementation |
@@ -277,7 +283,7 @@ From this checkout, activate the existing environment:
 
 ```bash
 source /home/yoon/vla_finetune/activate_gr00t.sh
-cd /home/yoon/vla_finetune/Isaac-GR00T
+cd /home/yoon/vla_finetune/gr00t-bigenlight/n17
 python -m gr00t.rl.train --help
 ```
 

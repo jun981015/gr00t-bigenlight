@@ -1,9 +1,23 @@
-# GR00T Bigenlight — private working-code snapshot
+# GR00T Bigenlight — canonical local workspace
 
-N1.5 and N1.7 source snapshots, including local modifications and newly added
-research/experiment/test files. Exported on 2026-09-20. This is a **code backup and
-development starting point**, not a tested one-command real-robot deployment.
-Original working directories and running training jobs are not changed by export.
+Maintain N1.5 and N1.7 development and new launches here. Consolidated locally on
+2026-09-20, including the latest cached IQL and frozen-Q SVF implementation.
+Legacy working directories remain available for already-running jobs and queued
+commands. Data, weights, feature caches and environments remain on RAID.
+The consolidated code is maintained in this private Git repository.
+
+```bash
+cd ~/vla_finetune/gr00t-bigenlight
+source environments/activate_n17.sh
+IQL_REWARD=step-cost bash n17/examples/bigenlight_multitask/train_cached_iql.sh all # dry run
+bash n17/examples/bigenlight_multitask/train_fixed_q_svf.sh all # dry run
+```
+
+For N1.5, use a separate shell, `source environments/activate_n15.sh`, then
+`cd n15` before running its Python modules. Both versions expose `gr00t`; the
+helpers select the matching RAID environment and this checkout's PYTHONPATH.
+See [local migration notes](LOCAL_WORKSPACE.md) for existing cache compatibility,
+legacy jobs, simulator submodules and the boundary with the separate fmrl repo.
 
 ## Contents
 
@@ -13,6 +27,9 @@ Original working directories and running training jobs are not changed by export
   environments, plus original server activation/cache helpers for reference.
 - `SOURCE_SNAPSHOT.json`: exact upstream commits, source remotes, per-file hashes,
   exclusions and pinned simulator submodules.
+- `CONSOLIDATION_SOURCE_SNAPSHOT.json`: source hashes immediately before this
+  consolidation's path changes; `SOURCE_SNAPSHOT.json` is the original export.
+- `tools/server/`: shared inference checks, VRAM/synthetic-data and GPU utilities.
 - `tools/snapshot_worktrees.py`: export procedure; refuses to overwrite version directories.
 
 Original LICENSE, attribution and source headers are retained within each tree.
@@ -43,11 +60,11 @@ Package inventories record versions; they are not portable lockfiles for CUDA,
 system/FFmpeg libraries or local packages. Use the respective upstream install
 instructions and matching GPU runtime, not a combined pip install.
 
-Some existing launchers intentionally retain the original server paths, such as
-`~/vla_finetune/Isaac-GR00T`, `~/vla_finetune/DEAS-Isaac-GR00T`, and RAID paths.
-They are preserved unchanged for provenance, **not silently rewritten** during
-backup. Adapt those paths to this checkout before using them on another machine.
-The environment helper scripts are reference copies, not an automatic installer.
+Maintained BC/IQL/SVF and simulator launchers resolve code relative to this checkout.
+Environment helpers use the existing server RAID environments; they are not an
+automatic installer. Override storage settings for another machine as needed.
+Do not reinstall the shared environments while legacy jobs are active; use the
+provided activation helpers to select this source tree for new processes.
 
 ## Bigenlight BC recipes
 
@@ -82,6 +99,10 @@ N1.5 contains opt-in IQL and SVF critic heads and their tests. See
 IQL V, scalar or distributional Q/V losses, Fourier time embedding, frozen VLM
 context and independent gradients/targets. Full SVF sampling/actor training is
 not yet an end-to-end recipe. N1.7 offline-RL adapters are under `n17/gr00t/rl/`.
+N1.7 includes cached-feature IQL and SVF with frozen imported IQL Q1/Q2; see
+`n17/examples/bigenlight_multitask/IQL.md`, `FEATURE_CACHE.md`, and `FIXED_Q_SVF.md`.
+The frozen-Q mode trains inner value and actor while preserving the original BC
+conditioning for Q. Full pretrained GPU SVF convergence is not yet measured.
 The separate `fmrl` repository is not included; its referenced commit is documented
 in the critic implementation. Research code remains private in this repository.
 

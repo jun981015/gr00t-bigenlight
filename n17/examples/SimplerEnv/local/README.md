@@ -21,7 +21,7 @@ GR00T에 고정된 **ManiSkill2 기반 SimplerEnv fork**를 사용한다. 별도
 ## 1. 설치 및 CPU 점검 — 호스트에서도 가능
 
 ```bash
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 bash examples/SimplerEnv/local/setup.sh
 bash examples/SimplerEnv/local/run.sh doctor
 bash examples/SimplerEnv/local/run.sh tasks

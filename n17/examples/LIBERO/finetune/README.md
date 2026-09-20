@@ -64,8 +64,8 @@ LayerNorm + VL self-attention transformer
 
 코드 근거:
 
-- [BC head](/home/yoon/vla_finetune/DEAS-Isaac-GR00T/gr00t/model/action_head/flow_matching_action_head.py):
-  실제 sibling repo 경로는 `/home/yoon/vla_finetune/DEAS-Isaac-GR00T/` 아래입니다.
+- [BC head](/home/yoon/vla_finetune/gr00t-bigenlight/n15/gr00t/model/action_head/flow_matching_action_head.py):
+  실제 sibling repo 경로는 `/home/yoon/vla_finetune/gr00t-bigenlight/n15/` 아래입니다.
   `__init__`, `process_backbone_output`에 LN/transformer가 있습니다.
 - `gr00t/model/gr00t_n1_deas_critic.py`, `from_pretrained`: BC의 `backbone`,
   `action_head.vlln`, `action_head.vl_self_attention`을 critic 모델에 복사합니다.
@@ -127,7 +127,7 @@ Goal episode 82 wrist video는 공식 patch를 overlay에만 연결합니다.
 source는 수정하지 않고, 다른 provenance의 기존 경로는 덮어쓰지 않습니다.
 
 ```bash
-cd /home/yoon/vla_finetune/Isaac-GR00T
+cd /home/yoon/vla_finetune/gr00t-bigenlight/n17
 # CPU only; full demos, all four suites. HTTP 429/5xx는 대기 후 제한적으로 재시도.
 bash examples/LIBERO/finetune/run.sh data download-and-prepare
 
@@ -181,7 +181,7 @@ Adam/scheduler/RNG만 유지**합니다. 8시간 budget에서 저장하고 종�
 
 ```bash
 source /home/yoon/vla_finetune/activate_gr00t.sh
-cd /home/yoon/vla_finetune/Isaac-GR00T
+cd /home/yoon/vla_finetune/gr00t-bigenlight/n17
 python examples/carrot_in_pot/resume_training.py \
   /raid/yoon/vla_finetune/outputs/libero-spatial-bc \
   --save-steps 2000 --max-run-seconds 28800

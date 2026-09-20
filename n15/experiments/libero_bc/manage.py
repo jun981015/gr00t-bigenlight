@@ -135,7 +135,7 @@ def launch(args):
     env = os.environ.copy()
     for key in ("CUDA_VISIBLE_DEVICES", "WANDB_RUN_ID", "WANDB_RESUME"):
         env.pop(key, None)
-    n17 = REPO.parent / "Isaac-GR00T/examples/carrot_in_pot"
+    n17 = REPO.parent / "n17/examples/carrot_in_pot"
     guard_python = storage() / "envs/gr00t-n1.7/bin/python"
     env["CARROT_KEEPALIVE_PIDS"] = subprocess.check_output(
         [str(guard_python), str(n17 / "ensure_keepalive.py")], env=env, text=True

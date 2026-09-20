@@ -65,7 +65,7 @@ hf download Bigenlight/carrot_in_pot_lerobot_v3 \
 
 ```bash
 source ~/vla_finetune/activate_gr00t.sh
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 python -m examples.carrot_in_pot.prepare_dataset
 python -m examples.carrot_in_pot.validate_dataset
 ```
@@ -126,7 +126,7 @@ loss, learning rate, gradient norm과 W&B 시스템 지표를 기록하며, 이 
 ### 실행
 
 ```bash
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 bash examples/carrot_in_pot/train.sh
 ```
 
@@ -194,7 +194,7 @@ checkpoint와 processor는 `~/raid/vla_finetune/outputs/carrot-bc-*`에 저장�
 새 GPU 컨테이너에서 (동일한 RAID/home 마운트와 GPU 2개 필요):
 
 ```bash
-cd ~/vla_finetune/Isaac-GR00T
+cd ~/vla_finetune/gr00t-bigenlight/n17
 bash examples/carrot_in_pot/train.sh --resume-dir \
   ~/raid/vla_finetune/outputs/carrot-bc-20260915T120408-84848
 ```

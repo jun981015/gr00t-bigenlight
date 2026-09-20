@@ -222,10 +222,10 @@ def stage(variant):
     configs.mkdir()
     shutil.copyfile(Path(__file__).with_name("config.py"), configs / "n17_modality.py")
     shutil.copyfile(
-        WORKSPACE / "DEAS-Isaac-GR00T/experiments/bigenlight_multitask/config.py",
+        WORKSPACE / "n15/experiments/bigenlight_multitask/config.py",
         configs / "n15_data_config.py",
     )
-    shutil.copyfile(WORKSPACE / "DEAS-Isaac-GR00T/LICENSE", target / "LICENSE")
+    shutil.copyfile(WORKSPACE / "n15/LICENSE", target / "LICENSE")
     (target / "NOTICE").write_text(
         "Original robot demonstrations: Bigenlight / Theo.\n"
         "Conversion and subset packaging: RLobot-jun.\n"

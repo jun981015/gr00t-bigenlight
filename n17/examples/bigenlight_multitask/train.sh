@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Dry-run by default. Execute inside an allocated GPU container only.
 set -eo pipefail
-source "$HOME/vla_finetune/activate_gr00t.sh"
-cd "$HOME/vla_finetune/Isaac-GR00T"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/activate_gr00t.sh"
+cd "$GR00T_N17_ROOT"
 execute=false
 if [[ "${1:-}" == --execute ]]; then execute=true; shift; fi
 dataset="${BIGENLIGHT_DATASET_PATH:-$VLA_STORAGE_ROOT/datasets/bigenlight_multitask_gr00t/n17}"
