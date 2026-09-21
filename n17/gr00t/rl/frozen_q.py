@@ -18,6 +18,22 @@ from .feature_cache import FORMAT, identities_match
 from .networks import FeatureCritic
 
 
+class FrozenActionIQLQ(torch.nn.Module):
+    """New [B,E] action-IQL -> SVF [1,B], using the trained ensemble MEAN.
+
+    Reducing here keeps environment-Q mean independent of the legacy SVF
+    q_aggregation setting, which still controls the two inner heads' loss.
+    No detach/no_grad: action gradients remain available with frozen weights.
+    """
+
+    def __init__(self, q):
+        super().__init__()
+        self.q = q.requires_grad_(False).eval()
+
+    def forward(self, observations, actions):
+        return self.q(observations, actions).mean(-1).unsqueeze(0)
+
+
 class FrozenDEASQ(torch.nn.Module):
     """Online DEAS projection + twin distribution means, with action gradients.
 
@@ -207,7 +223,7 @@ class FrozenQInnerOnly(FrozenQSoftValueFlow):
 def load_frozen_iql_q(
     checkpoint, cache, *, identity, feature_dim, action_mask, gamma, reward, device="cpu"
 ):
-    """Import ONLINE twin Q, not V/target/optimizer, from a trusted full state.
+    """Import ONLINE Q, not V/target/optimizer, from a trusted checkpoint.
 
     Require exact cache provenance, BC/normalization/dataset identity, action mask,
     reward and discount. Legacy live-VLM checkpoints are intentionally rejected.
@@ -237,22 +253,51 @@ def load_frozen_iql_q(
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     metadata = state["metadata"]
     algorithm = state["algorithm"]
+    is_action_iql = algorithm.get("algorithm") == "action-conditioned-iql-v1"
+    expected_backend = "action-conditioned-iql-cache-v1" if is_action_iql else "frozen-bc-cache-v1"
+    valid_archive = state.get("format_version") == 1 or (
+        is_action_iql and state.get("model_only") is True
+    )
     if (
-        state.get("format_version") != 1
-        or algorithm.get("algorithm") not in ("iql-critic-only-v1", "deas-cached-critic-v1")
+        not valid_archive
+        or algorithm.get("algorithm")
+        not in ("iql-critic-only-v1", "deas-cached-critic-v1", "action-conditioned-iql-v1")
         or state.get("step", 0) < 1
         or state["step"] != algorithm["updates"]
-        or metadata.get("backend") != "frozen-bc-cache-v1"
+        or metadata.get("backend") != expected_backend
         or metadata.get("cache_manifest_sha256") != digest
         or metadata.get("bc_identity") != manifest["identity"]
     ):
-        raise ValueError("Require a matching cached-IQL or DEAS full training checkpoint")
+        raise ValueError("Require matching cached-IQL/DEAS checkpoint and provenance")
     settings = metadata["args"]
     is_deas = algorithm["algorithm"] == "deas-cached-critic-v1"
     source_gamma = settings["discount2"] if is_deas else settings["gamma"]
     if source_gamma != gamma or settings["reward"] != reward:
         raise ValueError("IQL reward/discount mismatch")
-    if is_deas:
+    if is_action_iql:
+        from .action_conditioned_iql import ActionConditionedQEnsemble
+
+        if (
+            metadata.get("q_layout") != "batch,heads"
+            or metadata.get("feature_dim") != feature_dim
+            or metadata.get("action_shape") != list(action_mask.shape[1:])
+            or metadata.get("action_indices") != indices
+            or metadata.get("config") != algorithm["config"]
+        ):
+            raise ValueError("Action-IQL architecture/configuration provenance mismatch")
+        q = ActionConditionedQEnsemble(
+            feature_dim,
+            action_mask.shape[1:],
+            indices,
+            settings["hidden_dims"],
+            settings["num_q_heads"],
+            exclude_proprio=settings.get("exclude_proprio", False),
+        )
+        q.load_state_dict(algorithm["critic"], strict=True)
+        if q.action_indices.tolist() != indices:
+            raise ValueError("Action-IQL saved action indices differ from cache")
+        critic = FrozenActionIQLQ(q)
+    elif is_deas:
         if metadata.get("deas_config") != algorithm["config"] or any(
             settings[key] != algorithm["config"][key]
             for key in ("discount1", "discount2", "expectile", "learning_rate")
@@ -280,12 +325,20 @@ def load_frozen_iql_q(
         "iql_step": state["step"],
         "cache_manifest_sha256": digest,
         "source": (
-            "online DEAS projection + Q1/Q2 distribution means; no V or optimizer"
+            "online action-conditioned IQL ensemble MEAN; no V/EMA V or optimizer"
+            if is_action_iql
+            else "online DEAS projection + Q1/Q2 distribution means; no V or optimizer"
             if is_deas
             else "online IQL Q1/Q2; no IQL V or optimizer"
         ),
         "metadata": metadata,
     }
+    if is_action_iql:
+        provenance.update(
+            env_q_aggregation="mean",
+            num_q_heads=settings["num_q_heads"],
+            exclude_proprio=settings.get("exclude_proprio", False),
+        )
     if is_deas:
         # Frozen-Q SVF never uses batch rewards/discounts in its objective.
         # Preserve BOTH source discounts rather than claiming a single-gamma TD.

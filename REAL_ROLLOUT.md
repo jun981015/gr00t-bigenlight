@@ -4,6 +4,10 @@ This repository contains current N1.5/N1.7 BC and N1.7 offline-RL code.
 It does not yet provide an end-to-end, hardware-validated UR7e controller.
 No robot actuation or inference parity test was performed for this handoff.
 
+For the newer action-reinjected ten-head IQL150k SVF bundles, first read
+[CRITIC_SVF_QUICKSTART.md](CRITIC_SVF_QUICKSTART.md). Their environment critic is
+not the legacy twin-Q model; actor LoRA/base-model reconstruction remains required.
+
 Update: `gr00t.rl.export_adapter` provides a BC-deduplicated LoRA/critic export
 and `load_actor_adapter` for a configured ProjectedFlowActor. It verifies all
 frozen actor tensors against the local BC after dtype conversion. The shared

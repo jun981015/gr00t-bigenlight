@@ -24,11 +24,11 @@ def discounted_returns(rewards, gamma):
     return result
 
 
-def validate_provenance(checkpoint, train_root, dataset):
+def validate_provenance(checkpoint, train_root, dataset, expected_backend="frozen-bc-cache-v1"):
     train_root = Path(train_root)
     train_manifest = json.loads((train_root / "manifest.json").read_text())
     metadata = checkpoint["metadata"]
-    if metadata["backend"] != "frozen-bc-cache-v1":
+    if metadata["backend"] != expected_backend:
         raise ValueError("Expected cached IQL checkpoint")
     if (
         metadata["cache_manifest_sha256"]

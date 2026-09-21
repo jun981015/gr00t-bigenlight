@@ -38,6 +38,69 @@ def learner():
     )
 
 
+def test_action_iql_archive_mean_adapter_gradient_and_svf_update(tmp_path):
+    from gr00t.rl.action_conditioned_iql import load_action_iql_models
+    from gr00t.rl.train_action_iql import main as train_action
+
+    cache, output = tmp_path / "cache", tmp_path / "run"
+    make_cache(cache)
+    train_action(
+        [
+            "--cache",
+            str(cache),
+            "--output-dir",
+            str(output),
+            "--assume-all-success",
+            "--steps",
+            "2",
+            "--device",
+            "cpu",
+            "--hidden-dims",
+            "8",
+            "--num-q-heads",
+            "10",
+            "--batch-size",
+            "2",
+        ]
+    )
+    ds = CachedFeatureDataset(cache, reward="step-cost")
+    batch_data = ds.batch([0, 3])
+    path = output / "checkpoints/model-step-2.pt"
+    raw, _, _ = load_action_iql_models(path)
+    q, provenance = load_frozen_iql_q(
+        path,
+        cache,
+        identity=ds.manifest["identity"],
+        feature_dim=ds.feature_dim,
+        action_mask=batch_data.action_mask,
+        gamma=0.99,
+        reward="step-cost",
+    )
+    action = batch_data.actions.detach().requires_grad_(True)
+    expected = raw(batch_data.observations, action).mean(-1)
+    actual = q(batch_data.observations, action)
+    assert actual.shape == (1, 2)
+    torch.testing.assert_close(actual[0], expected, rtol=0, atol=0)
+    grad = torch.autograd.grad(actual.sum(), action)[0]
+    expected_grad = torch.autograd.grad(expected.sum(), action)[0]
+    torch.testing.assert_close(grad, expected_grad, rtol=0, atol=0)
+    assert grad.norm() > 0
+    assert provenance["env_q_aggregation"] == "mean" and provenance["num_q_heads"] == 10
+    before = deepcopy(q.state_dict())
+    algo = FrozenQSoftValueFlow(
+        FeatureFlowActor(1, ds.action_shape, (8,)),
+        q,
+        FeatureCritic(1, ds.action_shape, (8,), time_embed_dim=16),
+        SVFConfig(
+            flow_steps=2, candidates=2, soft_lambda=0.5, freeze_reference=True, q_aggregation="min"
+        ),
+    )
+    metrics = algo.update(batch_data)
+    assert metrics["critic/env_q_frozen"] == 1
+    assert all(torch.equal(val, before[k]) for k, val in q.state_dict().items())
+    assert all(not p.requires_grad and p.grad is None for p in q.parameters())
+
+
 def test_only_actor_and_inner_update_without_next_action_or_q_ema(monkeypatch):
     model = learner()
     names = ["actor", "inner_critic", "critic", "target_critic", "reference"]

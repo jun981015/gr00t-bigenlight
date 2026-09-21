@@ -1,5 +1,8 @@
 # GR00T Bigenlight — canonical local workspace
 
+For the new 10-head action-conditioned IQL + SVF weights on `q-vgm-critic`, see
+[CRITIC_SVF_QUICKSTART.md](CRITIC_SVF_QUICKSTART.md) for HF names and loading differences.
+
 For real-hardware handoff, start with [REAL_ROLLOUT.md](REAL_ROLLOUT.md).
 It distinguishes native BC inference from SVF checkpoints (not yet directly
 loadable by the BC server), documents the private connection and robot contract,
