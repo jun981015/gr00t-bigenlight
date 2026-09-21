@@ -1,5 +1,10 @@
 # GR00T Bigenlight — canonical local workspace
 
+For real-hardware handoff, start with [REAL_ROLLOUT.md](REAL_ROLLOUT.md).
+It distinguishes native BC inference from SVF checkpoints (not yet directly
+loadable by the BC server), documents the private connection and robot contract,
+and maps the current critic/cache/LoRA implementation.
+
 Maintain N1.5 and N1.7 development and new launches here. Consolidated locally on
 2026-09-20, including the latest cached IQL and frozen-Q SVF implementation.
 Legacy working directories remain available for already-running jobs and queued

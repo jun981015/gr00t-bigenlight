@@ -32,7 +32,12 @@ from .dataset import (
     OfflineRLConcatDataset,
 )
 from .feature_cache import cache_identity
-from .frozen_q import FrozenQConditioningEncoder, FrozenQSoftValueFlow, load_frozen_iql_q
+from .frozen_q import (
+    FrozenQConditioningEncoder,
+    FrozenQInnerOnly,
+    FrozenQSoftValueFlow,
+    load_frozen_iql_q,
+)
 from .iql import FeatureValue, IQLConfig, IQLCriticLearner
 from .networks import FeatureCritic, FeatureFlowActor
 from .trainer import OfflineTrainer
@@ -134,14 +139,36 @@ def parse_args(argv=None):
     parser.add_argument("--q-aggregation", choices=("mean", "min"), default="mean")
     parser.add_argument("--freeze-reference", action="store_true")
     parser.add_argument(
-        "--fixed-iql-checkpoint",
+        "--dit-lora-rank",
+        type=int,
+        default=0,
+        help="Positive rank: train only DiT LoRA, freeze all projections/reference",
+    )
+    parser.add_argument("--dit-lora-alpha", type=float, default=32.0)
+    parser.add_argument(
+        "--critic-feature-cache",
         type=Path,
-        help="Trusted cached-IQL full checkpoint; freezes env Q and BC reference",
+        help="Reuse pooled Q/inner features with live DiT tokens; requires DiT LoRA",
     )
     parser.add_argument(
-        "--fixed-iql-cache", type=Path, help="Completed cache used to train --fixed-iql-checkpoint"
+        "--fixed-iql-checkpoint",
+        "--fixed-q-checkpoint",
+        type=Path,
+        help="Trusted cached IQL or DEAS full checkpoint; freezes env Q and BC reference",
+    )
+    parser.add_argument(
+        "--fixed-iql-cache", "--fixed-q-cache", type=Path, help="Completed source critic cache"
     )
     parser.add_argument("--first-save-step", type=int, default=0)
+    parser.add_argument("--allow-batch-size-change", action="store_true")
+    parser.add_argument(
+        "--inner-only", action="store_true", help="Freeze actor/reference/env Q; train inner only"
+    )
+    parser.add_argument(
+        "--initialize-svf",
+        type=Path,
+        help="Trusted fixed-Q SVF checkpoint to fork joint or inner-only runs",
+    )
     parser.add_argument("--save-interval-seconds", type=float, default=0)
     parser.add_argument("--max-run-seconds", type=float, default=0)
     parser.add_argument("--keep-latest-training-state", action="store_true")
@@ -162,6 +189,18 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     fixed_q = args.fixed_iql_checkpoint is not None
+    if args.inner_only and not (fixed_q and args.algorithm == "svf"):
+        raise ValueError("Inner-only requires fixed-Q SVF")
+    if args.initialize_svf and not (fixed_q and args.algorithm == "svf"):
+        raise ValueError("--initialize-svf requires fixed-Q SVF")
+    if args.dit_lora_rank < 0:
+        raise ValueError("LoRA rank cannot be negative")
+    if args.dit_lora_rank:
+        if args.backend != "gr00t" or args.algorithm != "svf":
+            raise ValueError("DiT LoRA currently requires GR00T SVF")
+        args.freeze_reference = True
+    if args.critic_feature_cache and not args.dit_lora_rank:
+        raise ValueError("--critic-feature-cache currently requires --dit-lora-rank")
     if fixed_q != (args.fixed_iql_cache is not None):
         raise ValueError("Provide both --fixed-iql-checkpoint and --fixed-iql-cache")
     if fixed_q:
@@ -245,6 +284,45 @@ def main(argv=None):
         if args.algorithm == "iql":
             encoder = FrozenBCGR00TEncoder(policy.model)
             assert not any(p.requires_grad for p in policy.model.parameters())
+        elif args.dit_lora_rank:
+            from .feature_cache import CachedFeatureDataset, identities_match
+            from .projected_actor import FrozenProjectedEncoder, lora_actor_pair
+
+            fixed_q_identity = (
+                cache_identity(
+                    args.model_path, args.dataset_path[0], args.horizon, args.embodiment_tag
+                )
+                if fixed_q
+                else None
+            )
+            actor, reference, _ = lora_actor_pair(
+                policy.model.action_head, args.dit_lora_rank, args.dit_lora_alpha
+            )
+            pooled_path = args.critic_feature_cache or (args.fixed_iql_cache if fixed_q else None)
+            pooled = None
+            if pooled_path:
+                if len(args.dataset_path) != 1 or args.annotation_format not in (
+                    "all-success-terminal",
+                    "all-success-step-cost",
+                ):
+                    raise ValueError(
+                        "Critic cache requires its original single all-success dataset"
+                    )
+                if fixed_q and pooled_path.resolve() != args.fixed_iql_cache.resolve():
+                    raise ValueError("IQL Q and critic features must use the same cache")
+                pooled = CachedFeatureDataset(
+                    pooled_path,
+                    gamma=args.gamma,
+                    reward="step-cost"
+                    if args.annotation_format == "all-success-step-cost"
+                    else "terminal-success",
+                )
+                expected = cache_identity(
+                    args.model_path, args.dataset_path[0], args.horizon, args.embodiment_tag
+                )
+                if not identities_match(pooled.manifest["identity"], expected):
+                    raise ValueError("Critic cache BC/data identity mismatch")
+            encoder = FrozenProjectedEncoder(policy.model, critic_cache=pooled)
         else:
             if fixed_q:
                 from copy import deepcopy
@@ -383,7 +461,8 @@ def main(argv=None):
             ),
             device=args.device,
         )
-        algorithm = FrozenQSoftValueFlow(
+        learner_class = FrozenQInnerOnly if args.inner_only else FrozenQSoftValueFlow
+        algorithm = learner_class(
             actor,
             critic,
             FeatureCritic(feature_dim, shape, hidden_dims, time_embed_dim=16).to(args.device),
@@ -396,6 +475,7 @@ def main(argv=None):
             FeatureCritic(feature_dim, shape, hidden_dims).to(args.device),
             FeatureCritic(feature_dim, shape, hidden_dims, time_embed_dim=16).to(args.device),
             config,
+            reference=reference,
         )
     semantic_args = {
         key: value
@@ -421,6 +501,11 @@ def main(argv=None):
             "decoder_threads",
         )
         and (fixed_q or key not in ("fixed_iql_checkpoint", "fixed_iql_cache"))
+        and (args.dit_lora_rank or key not in ("dit_lora_rank", "dit_lora_alpha"))
+        and (args.critic_feature_cache is not None or key != "critic_feature_cache")
+        and (args.inner_only or key != "inner_only")
+        and key != "initialize_svf"
+        and key != "allow_batch_size_change"
     }
     signal_hash = hashlib.sha256()
     for annotation in dataset.annotations:
@@ -445,9 +530,58 @@ def main(argv=None):
     )
     if fixed_q:
         metadata["fixed_iql_q"] = q_provenance
+    if args.initialize_svf:
+        source = torch.load(args.initialize_svf, map_location="cpu", weights_only=False)
+        expected = json.loads(json.dumps(metadata))
+        expected["args"].pop("inner_only", None)
+        source_metadata = json.loads(json.dumps(source.get("metadata")))
+        if isinstance(source_metadata, dict):
+            source_metadata.get("args", {}).pop("inner_only", None)
+            source_metadata.pop("initial_svf", None)
+        if args.allow_batch_size_change:
+            expected["args"].pop("batch_size", None)
+            source_metadata["args"].pop("batch_size", None)
+        if (
+            source.get("format_version") != 1
+            or source_metadata != expected
+            or source.get("step", 0) < 1
+            or source["step"] != source["algorithm"]["updates"]
+        ):
+            raise ValueError("Initialization SVF provenance differs from this run")
+        if not args.resume:
+            algorithm.initialize_from_svf(source["algorithm"])
+        with args.initialize_svf.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        metadata["initial_svf"] = {
+            "checkpoint": str(args.initialize_svf.resolve()),
+            "sha256": digest,
+            "step": source["step"],
+            "optimizer": "fresh inner-only Adam" if args.inner_only else "fresh actor+inner Adam",
+            "new_step_counter": True,
+        }
+        del source
     trainer = OfflineTrainer(algorithm, args.device, encoder, metadata=metadata)
     if args.resume is not None:
-        trainer.load_checkpoint(args.resume)
+        if args.allow_batch_size_change:
+            restored = torch.load(args.resume, map_location="cpu", weights_only=False)
+            previous_metadata = restored["metadata"]
+            del restored
+            comparable = json.loads(json.dumps(previous_metadata))
+            transitions = comparable.pop("batch_size_transitions", [])
+            old_batch_size = comparable["args"]["batch_size"]
+            comparable["args"]["batch_size"] = args.batch_size
+            if comparable != metadata:
+                raise ValueError("Only batch-size changes are allowed during this resume")
+            trainer.metadata = previous_metadata
+            trainer.load_checkpoint(args.resume)
+            if old_batch_size != args.batch_size:
+                transitions = transitions + [
+                    {"step": trainer.step, "old": old_batch_size, "new": args.batch_size}
+                ]
+            metadata["batch_size_transitions"] = transitions
+            trainer.metadata = json.loads(json.dumps(metadata))
+        else:
+            trainer.load_checkpoint(args.resume)
     if args.steps <= trainer.step:
         raise ValueError("--steps must exceed the restored update count")
     manifest = args.output_dir / "run.json"

@@ -1,5 +1,6 @@
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
 import json
 
 from gr00t.rl.adapters import FrozenBCGR00TEncoder, Gr00tFlowActor
@@ -87,6 +88,32 @@ def test_frozen_q_checkpoint_resume(tmp_path):
     actual = second.update(data)
     assert actual == pytest.approx(expected)
     assert all(not p.requires_grad for p in second.algorithm.critic.parameters())
+
+
+def test_joint_reenabled_from_inner_snapshot():
+    from gr00t.rl.frozen_q import FrozenQInnerOnly
+
+    source = learner()
+    inner = FrozenQInnerOnly(
+        deepcopy(source.actor),
+        deepcopy(source.critic),
+        deepcopy(source.inner_critic),
+        source.config,
+        reference=deepcopy(source.reference),
+    )
+    inner.update(batch())
+    joint = learner()
+    joint.initialize_from_svf(inner.state_dict())
+    assert joint.updates == 0 and not joint.optimizer.state
+    before_actor = deepcopy(joint.actor.state_dict())
+    before_inner = deepcopy(joint.inner_critic.state_dict())
+    before_q = deepcopy(joint.critic.state_dict())
+    joint.update(batch())
+    assert any(not torch.equal(v, before_actor[k]) for k, v in joint.actor.state_dict().items())
+    assert any(
+        not torch.equal(v, before_inner[k]) for k, v in joint.inner_critic.state_dict().items()
+    )
+    assert all(torch.equal(v, before_q[k]) for k, v in joint.critic.state_dict().items())
 
 
 def test_q_conditioning_matches_bc_and_survives_actor_changes():
@@ -211,3 +238,115 @@ def test_cli_rejects_partial_or_wrong_mode_before_model_load(tmp_path):
         train_main(args)
     with pytest.raises(ValueError, match="GR00T SVF"):
         train_main(args + ["--fixed-iql-cache", "cache"])
+
+
+def test_deas_import_scores_gradients_and_frozen_svf(tmp_path):
+    from gr00t.rl.deas_cached import DEASCachedLearner, DEASConfig
+
+    cache = tmp_path / "cache"
+    make_cache(cache)
+    dataset = CachedFeatureDataset(cache, reward="step-cost")
+    data = dataset.batch([0, 1])
+    config = DEASConfig(
+        vlm_dim=1,
+        state_dim=0,
+        embodiment_dim=0,
+        projection_width=8,
+        feature_dim=4,
+        hidden_dim=8,
+        depth=1,
+    )
+    source = DEASCachedLearner(dataset.action_indices, config)
+    source.update(data)
+    settings = dict(
+        discount1=0.9, discount2=0.99, expectile=0.7, learning_rate=1e-4, reward="step-cost"
+    )
+    metadata = {
+        "backend": "frozen-bc-cache-v1",
+        "cache_manifest_sha256": hashlib.sha256((cache / "manifest.json").read_bytes()).hexdigest(),
+        "bc_identity": dataset.manifest["identity"],
+        "args": settings,
+        "deas_config": asdict(config),
+    }
+    trainer = OfflineTrainer(source, metadata=metadata)
+    trainer.step = 1
+    checkpoint = tmp_path / "deas.pt"
+    trainer.save_checkpoint(checkpoint)
+    kwargs = dict(
+        identity=dataset.manifest["identity"],
+        feature_dim=1,
+        action_mask=data.action_mask,
+        gamma=0.99,
+        reward="step-cost",
+    )
+    critic, provenance = load_frozen_iql_q(checkpoint, cache, **kwargs)
+    features = source.features(data.observations)
+    packed = data.actions.flatten(1)[:, dataset.action_indices]
+    expected = torch.stack(
+        [source.hlg.decode(q(torch.cat((features, packed), -1))) for q in source.critic]
+    )
+    actions = data.actions.clone().requires_grad_(True)
+    actual = critic(data.observations, actions)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    actual.sum().backward()
+    assert actions.grad.abs().sum() > 0
+    assert (actions.grad * (1 - data.action_mask)).abs().sum() == 0
+    assert all(p.grad is None for p in critic.parameters())
+    assert provenance["discount1"] == 0.9 and provenance["discount2"] == 0.99
+    before = deepcopy(critic.state_dict())
+    algorithm = FrozenQSoftValueFlow(
+        FeatureFlowActor(1, dataset.action_shape, (8,)),
+        critic,
+        FeatureCritic(1, dataset.action_shape, (8,), time_embed_dim=16),
+        SVFConfig(flow_steps=2, candidates=2, soft_lambda=1, freeze_reference=True),
+    )
+    metrics = algorithm.update(data)
+    assert metrics["critic/env_q_frozen"] == 1
+    for key, value in critic.state_dict().items():
+        torch.testing.assert_close(value, before[key], rtol=0, atol=0)
+    with pytest.raises(ValueError, match="discount mismatch"):
+        load_frozen_iql_q(checkpoint, cache, **{**kwargs, "gamma": 0.9})
+
+
+def test_inner_only_preserves_actor_q_and_resumes(tmp_path, monkeypatch):
+    from gr00t.rl.frozen_q import FrozenQInnerOnly
+
+    source = learner()
+    source.update(batch())
+    model = FrozenQInnerOnly(
+        deepcopy(source.actor),
+        deepcopy(source.critic),
+        deepcopy(source.inner_critic),
+        source.config,
+        reference=deepcopy(source.reference),
+    )
+    model.initialize_from_svf(source.state_dict())
+    assert model.updates == 0 and not model.optimizer.state
+    data = batch()
+    torch.manual_seed(99)
+    _, expected = source.losses(data)
+    torch.manual_seed(99)
+    loss, _ = model.losses(data)
+    torch.testing.assert_close(loss, expected["critic/inner_loss"])
+    names = ["actor", "reference", "critic", "target_critic", "inner_critic"]
+    before = {name: deepcopy(getattr(model, name).state_dict()) for name in names}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Inner-only must never run the actor")
+
+    monkeypatch.setattr(model.actor, "forward", forbidden)
+    trainer = OfflineTrainer(model)
+    trainer.update(data)
+    for name in names:
+        same = all(
+            torch.equal(v, before[name][key])
+            for key, v in getattr(model, name).state_dict().items()
+        )
+        assert same == (name != "inner_critic")
+    optimizer_ids = {id(p) for g in model.optimizer.param_groups for p in g["params"]}
+    assert optimizer_ids == {id(p) for p in model.inner_critic.parameters()}
+    trainer.save_checkpoint(tmp_path / "inner.pt")
+    expected = trainer.update(data)
+    trainer.load_checkpoint(tmp_path / "inner.pt")
+    actual = trainer.update(data)
+    assert actual == pytest.approx(expected)

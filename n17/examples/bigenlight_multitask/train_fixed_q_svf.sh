@@ -23,6 +23,9 @@ command=(python -m gr00t.rl.train --backend gr00t --algorithm svf
   --save-every 5000 --first-save-step 100 --save-interval-seconds 1800
   --max-run-seconds 28800 --keep-latest-training-state)
 if [[ -n "${SVF_RESUME:-}" ]]; then command+=(--resume "$SVF_RESUME"); fi
+if [[ -n "${SVF_DIT_LORA_RANK:-}" ]]; then
+  command+=(--dit-lora-rank "$SVF_DIT_LORA_RANK" --dit-lora-alpha "${SVF_DIT_LORA_ALPHA:-32}")
+fi
 printf '%q ' "${command[@]}"; printf '\n'
 if [[ "${1:-}" != --execute ]]; then exit 0; fi
 test -f /.dockerenv

@@ -1,5 +1,41 @@
 # SVF with frozen cached-IQL Q (N1.7)
 
+## DEAS distributional Q support
+
+The same loader now accepts `deas-cached-critic-v1` full checkpoints. It restores
+the learned DEAS projection and online Q1/Q2, freezes them together, and returns
+each head's expectation over the HL-Gauss bin centers. No DEAS V, target Q, or
+optimizer is imported. `min`/`mean` aggregation happens on decoded head values.
+Both source discounts are recorded; frozen-Q SVF performs no reward/TD backup.
+The CLI aliases `--fixed-q-checkpoint` and `--fixed-q-cache` accept either format.
+
+`bash examples/bigenlight_multitask/train_deas_fixed_q_svf.sh --execute` runs
+the all-data N1.7 BC with all-data DEAS lr=1e-4 step-30000, LoRA rank16/alpha32,
+batch2, Adam lr=3e-4, 8 candidates and 10 flow steps. A ten-step startup checkpoint
+is resumed to 10k updates. Env Q/reference/projections are frozen; DiT LoRA and
+fresh inner V train. W&B online logs every50; scheduled saves every5k plus recovery.
+The launcher supports concurrent user-owned cache extraction and does not stop it.
+
+## Inner-only continuation
+
+`--inner-only` freezes the actor in addition to reference and env Q. Only the
+inner network belongs to Adam; no actor forward/backward or guidance gradient
+is computed. The frozen reference DiT still generates SDE endpoint targets.
+`--initialize-svf PATH` copies the modules from a matching fixed-Q SVF full
+checkpoint, with a fresh inner-only optimizer and step counter. Source BC,
+dataset, critic, normalization and hyperparameters must match. `--resume` then
+restores an inner-only checkpoint normally; it cannot silently load a joint run.
+
+The 20260921-from114 sweep starts independent 10k/30k inner-only runs from joint
+step 114. The actor/reference/DEAS Q and learned inner weights are copied from
+that snapshot. The 30k run is not a continuation of the 10k run. W&B logs include
+inner predictions/targets (min/mean/max), inner MSE/absolute error and inner-only
+gradient norm. The existing 8-hour recovery stop still applies; rerun the same
+sweep after allocation recovery to continue from its latest saved state.
+
+Optional [DiT LoRA with frozen projections](DIT_LORA.md) is now available.
+The full-action-head path described below remains the default.
+
 This is policy improvement against an immutable IQL Q, not joint online Q-learning.
 It does not start, stop, or replace the running cache/IQL queue.
 
@@ -48,7 +84,7 @@ The general CLI flags are `--algorithm svf --backend gr00t
 the BC reference frozen. Both flags are required. Import validates checkpoint
 type, update count, completed cache hash, original BC/data/normalization identity,
 feature dimension, full action padding mask, reward preset and gamma. Only the
-current cached-IQL format is supported; legacy live-IQL states are rejected.
+current cached-IQL and cached-DEAS formats are supported; legacy live-IQL states are rejected.
 Use trusted local `.pt` checkpoints only. Source checkpoint SHA256 and metadata
 are recorded; SVF resume must use the same original BC, IQL source and settings.
 The frozen Q-conditioning copy is reconstructed from the verified original BC on

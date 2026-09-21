@@ -19,6 +19,9 @@ from .trainer import OfflineTrainer
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--algorithm", choices=["iql", "deas"], default="iql")
+    parser.add_argument("--discount1", type=float, default=0.9)
+    parser.add_argument("--discount2", type=float, default=0.99)
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
@@ -55,14 +58,37 @@ def main(argv=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    dataset = CachedFeatureDataset(args.cache, reward=args.reward, gamma=args.gamma)
-    hidden = (args.hidden_dim,) * args.hidden_layers
-    config = IQLConfig(args.learning_rate, args.expectile, args.target_tau)
-    learner = IQLCriticLearner(
-        FeatureCritic(dataset.feature_dim, dataset.action_shape, hidden).to(args.device),
-        FeatureValue(dataset.feature_dim, hidden).to(args.device),
-        config,
-    )
+    if args.algorithm == "deas":
+        from .deas_cached import DEASCachedLearner, DEASConfig, DEASDataset
+
+        if args.reward != "step-cost":
+            raise ValueError("DEAS cached backend requires step-cost rewards")
+        dataset = DEASDataset(args.cache, discount1=args.discount1, discount2=args.discount2)
+        bc_config = json.loads(
+            (Path(dataset.manifest["identity"]["model_path"]) / "config.json").read_text()
+        )
+        config = DEASConfig(
+            learning_rate=args.learning_rate,
+            expectile=args.expectile,
+            target_tau=args.target_tau,
+            discount1=args.discount1,
+            discount2=args.discount2,
+            vlm_dim=bc_config["backbone_embedding_dim"],
+            state_dim=bc_config["max_state_dim"],
+            embodiment_dim=bc_config["max_num_embodiments"],
+            hidden_dim=args.hidden_dim,
+            depth=args.hidden_layers,
+        )
+        learner = DEASCachedLearner(dataset.action_indices, config, args.device)
+    else:
+        dataset = CachedFeatureDataset(args.cache, reward=args.reward, gamma=args.gamma)
+        hidden = (args.hidden_dim,) * args.hidden_layers
+        config = IQLConfig(args.learning_rate, args.expectile, args.target_tau)
+        learner = IQLCriticLearner(
+            FeatureCritic(dataset.feature_dim, dataset.action_shape, hidden).to(args.device),
+            FeatureValue(dataset.feature_dim, hidden).to(args.device),
+            config,
+        )
     semantic = {
         k: v
         for k, v in vars(args).items()
@@ -85,6 +111,16 @@ def main(argv=None):
         "args": semantic,
         "bc_identity": dataset.manifest["identity"],
     }
+    if args.algorithm == "iql":
+        # Preserve exact metadata identity of existing IQL runs/checkpoints.
+        for key in ("algorithm", "discount1", "discount2"):
+            semantic.pop(key)
+    else:
+        semantic.pop("gamma")
+        from dataclasses import asdict
+
+        metadata["deas_config"] = asdict(config)
+        metadata["frontend"] = "N1.7 frozen masked pooled VLM; no N1.5 token attention"
     trainer = OfflineTrainer(learner, args.device, metadata=metadata)
     if args.resume:
         trainer.load_checkpoint(args.resume)
@@ -109,7 +145,11 @@ def main(argv=None):
                 "metadata": metadata,
                 "feature_dim": dataset.feature_dim,
                 "action_shape": list(dataset.action_shape),
-                "trainable": "new Q1/Q2 and IQL V only; no BC model loaded",
+                "trainable": (
+                    "new DEAS projection, Q1/Q2 and residual V; BC frozen"
+                    if args.algorithm == "deas"
+                    else "new Q1/Q2 and IQL V only; no BC model loaded"
+                ),
             },
         )
     wandb_run = None
@@ -153,8 +193,8 @@ def main(argv=None):
             log_path=metrics_path,
             checkpoint_dir=args.output_dir / "checkpoints",
             save_every=args.save_every,
-            first_save_step=100,
-            save_interval_seconds=1800,
+            first_save_step=0 if args.algorithm == "deas" else 100,
+            save_interval_seconds=0 if args.algorithm == "deas" else 1800,
             max_run_seconds=28800,
             keep_latest_training_state=True,
             metrics_callback=(
