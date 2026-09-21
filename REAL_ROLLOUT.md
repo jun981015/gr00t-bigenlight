@@ -4,6 +4,15 @@ This repository contains current N1.5/N1.7 BC and N1.7 offline-RL code.
 It does not yet provide an end-to-end, hardware-validated UR7e controller.
 No robot actuation or inference parity test was performed for this handoff.
 
+Update: `gr00t.rl.export_adapter` provides a BC-deduplicated LoRA/critic export
+and `load_actor_adapter` for a configured ProjectedFlowActor. It verifies all
+frozen actor tensors against the local BC after dtype conversion. The shared
+50/task BC HF weights were checked against local shard SHA-256s; its processor
+assets are available at revision `1704897ac6a2a93c1d1fd806925b9237977ed8c5`.
+This does not supply the missing robot adapter/native-server integration.
+Earlier notes below about lacking export refer to the full SVF-to-native-BC
+merge/server workflow, not this new adapter-only artifact.
+
 ## Checkpoint compatibility
 
 | Artifact | Existing BC inference server | Required extra work |

@@ -331,12 +331,18 @@ class SoftValueFlow(FlowBC):
             "actor/loss": actor_loss,
             "actor/bc_flow_loss": bc_loss,
             "sv/lambda": temperature,
+            "sv/kappa": temperature.new_tensor(self.config.kappa),
+            "sv/c": temperature.new_tensor(self.config.lambda_multiplier),
             "critic/sv_q_spread": q.std(0, correction=0).mean(),
             "critic/sv_weight_max": (q / temperature).softmax(0).max(0).values.mean(),
             "actor/sv_coef_mean": coefficient.mean(),
             "actor/sv_guidance_norm": guidance.flatten(1).norm(dim=1).mean(),
             "critic/td_target_mean": td_target.mean(),
         }
+        if self.config.soft_lambda is None:
+            metrics["sv/g"] = temperature.new_tensor(
+                self.config.kappa**2 / self.config.lambda_multiplier
+            )
         return loss, metrics
 
     @torch.no_grad()

@@ -15,6 +15,7 @@ exec python -u -m gr00t.rl.train_cached_svf \
   --reward step-cost --gamma 0.99 \
   --steps 10000 --batch-size 32 --learning-rate 3e-4 \
   --dit-lora-rank 16 --dit-lora-alpha 32 \
-  --flow-steps 10 --candidates 8 --q-aggregation min \
+  --flow-steps 4 --candidates 8 --q-aggregation min \
+  --kappa "${SVF_KAPPA:-1.0}" --g "${SVF_G:-1.0}" \
   --save-every 5000 --log-every 50 \
   --wandb-project bigenlight-multitask-gr00t --device cuda:0

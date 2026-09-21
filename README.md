@@ -5,6 +5,17 @@ It distinguishes native BC inference from SVF checkpoints (not yet directly
 loadable by the BC server), documents the private connection and robot contract,
 and maps the current critic/cache/LoRA implementation.
 
+LoRA-only SVF inference export is now available via
+`python -m gr00t.rl.export_adapter --checkpoint TRUSTED_SVF_PT --base-dir LOCAL_BC
+--base-repo HF_BC_REPO --base-revision EXACT_COMMIT --output-dir NEW_DIRECTORY
+[--upload-to EXISTING_HF_REPO]` in the N1.7 environment. It verifies frozen actor
+weights match BC after training dtype conversion, and exports actor adapters and
+optional online Q/inner critics, without BC/reference/targets/optimizer.
+Download only `adapter/` from the destination (do not snapshot the legacy full
+checkpoint too). Base weights and preprocessing must be loaded from the pinned
+BC revision. `load_actor_adapter` applies only adapters to an already configured
+ProjectedFlowActor; it is not a complete robot-server implementation.
+
 Maintain N1.5 and N1.7 development and new launches here. Consolidated locally on
 2026-09-20, including the latest cached IQL and frozen-Q SVF implementation.
 Legacy working directories remain available for already-running jobs and queued

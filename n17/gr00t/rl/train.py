@@ -135,7 +135,8 @@ def parse_args(argv=None):
     parser.add_argument("--flow-steps", type=int, default=10)
     parser.add_argument("--candidates", type=int, default=8)
     parser.add_argument("--kappa", type=float, default=1.0)
-    parser.add_argument("--lambda-multiplier", type=float, default=1.0)
+    parser.add_argument("--g", type=float, help="Relative guidance scale; c=kappa**2/g")
+    parser.add_argument("--lambda-multiplier", type=float, default=None)
     parser.add_argument("--q-aggregation", choices=("mean", "min"), default="mean")
     parser.add_argument("--freeze-reference", action="store_true")
     parser.add_argument(
@@ -183,7 +184,12 @@ def parse_args(argv=None):
     parser.add_argument(
         "--resume", type=Path, help="Trusted local training checkpoint, not an HF model checkpoint"
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    from .svf_hparams import resolve_lambda_multiplier
+
+    args.lambda_multiplier = resolve_lambda_multiplier(args.kappa, args.g, args.lambda_multiplier)
+    del args.g  # Serialize canonical c only; avoids ambiguous replayed CLI arguments.
+    return args
 
 
 def main(argv=None):

@@ -39,6 +39,9 @@ def main(argv=None):
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--flow-steps", type=int, default=10)
     parser.add_argument("--candidates", type=int, default=8)
+    parser.add_argument("--kappa", type=float, default=1.0)
+    parser.add_argument("--g", type=float, help="Relative guidance scale; c=kappa**2/g")
+    parser.add_argument("--lambda-multiplier", type=float, default=None)
     parser.add_argument("--soft-lambda", type=float)
     parser.add_argument("--q-aggregation", choices=["min", "mean"], default="min")
     parser.add_argument("--seed", type=int, default=0)
@@ -49,6 +52,12 @@ def main(argv=None):
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--allow-flow-steps-change", action="store_true")
     args = parser.parse_args(argv)
+    from .svf_hparams import resolve_lambda_multiplier
+
+    args.lambda_multiplier = resolve_lambda_multiplier(
+        args.kappa, args.g, args.lambda_multiplier, args.soft_lambda
+    )
+    del args.g
     if (args.env_q == "fixed-iql") != (args.iql_checkpoint is not None):
         raise ValueError("Supply --iql-checkpoint exactly for --env-q fixed-iql")
     if (
@@ -102,6 +111,8 @@ def main(argv=None):
         critic = FeatureCritic(feature_dim, shape, hidden).to(args.device)
     config = SVFConfig(
         learning_rate=args.learning_rate,
+        kappa=args.kappa,
+        lambda_multiplier=args.lambda_multiplier,
         flow_steps=args.flow_steps,
         candidates=args.candidates,
         soft_lambda=args.soft_lambda,
@@ -131,6 +142,8 @@ def main(argv=None):
                 "log_every",
                 "save_every",
                 "allow_flow_steps_change",
+                "kappa",  # Already recorded in svf_config; preserve old metadata schema.
+                "lambda_multiplier",
             )
         },
         "actor_manifest_sha256": hashlib.sha256(
@@ -214,6 +227,15 @@ def main(argv=None):
             name=args.output_dir.name,
             dir=str(args.output_dir),
             config=serialized,
+        )
+        wandb_run.config.update(
+            {
+                "svf_kappa": config.kappa,
+                "svf_c": config.lambda_multiplier,
+                "svf_g": config.kappa**2 / config.lambda_multiplier
+                if config.soft_lambda is None
+                else None,
+            }
         )
 
     def stop(signum, frame):

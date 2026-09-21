@@ -1,5 +1,35 @@
 # DiT LoRA and reuse of the existing IQL cache
 
+## Kappa/g controls
+
+Both live `gr00t.rl.train` and cached `gr00t.rl.train_cached_svf` accept
+`--kappa K --g G`. The canonical checkpoint config still stores
+`lambda_multiplier = K**2/G`, preserving old checkpoints. The legacy
+`--lambda-multiplier C` remains supported, but cannot be combined with `--g`.
+Likewise `--g` is incompatible with fixed `--soft-lambda` (cached trainer).
+Positive K/G are required for this parameterization; kappa=0 is still available
+through the legacy c interface. No flags retains historical kappa=c=g=1.
+
+Lambda is c * max(candidate-Q spread, 1e-3). Metrics expose sv/kappa, sv/c and
+sv/g (g is omitted for absolute-temperature mode). This is not an extra
+post-gradient multiplier. No bounded-guidance clipping is introduced here.
+The newer fmrl FAC sweep includes clipping; matching K/G alone does not
+reproduce that entire protocol.
+
+The 50/task launchers accept `SVF_KAPPA` and `SVF_G`. For a new TD-critic run:
+
+```bash
+SVF_KAPPA=0.4 SVF_G=0.25 bash n17/examples/bigenlight_multitask/train_cached_td_svf_50per.sh
+```
+
+This command starts training. Check GPU availability first. Use fresh runs
+from the same BC, Q/inner initialization seed and budgets for comparisons,
+not different points of one changing critic. A compact initial grid is
+K in {0.2,0.4,0.6}, G in {0.25,0.5}; the implied c values are
+{0.16,0.08}, {0.64,0.32}, {1.44,0.72}, respectively. Compare Q action sensitivity,
+terminal TD residuals, guidance/BC velocity norms and heldout/rollout behavior;
+training loss alone cannot select a policy. Existing running jobs are unchanged.
+
 ## Shared SVF endpoint draws (2026-09-21)
 
 Temperature estimation and the inner soft-value target now share the same
