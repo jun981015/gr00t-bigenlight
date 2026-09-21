@@ -1,7 +1,7 @@
 """SVF from disk-projected BC tokens: DiT LoRA + inner, optionally train env Q."""
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import json
 from pathlib import Path
@@ -47,6 +47,7 @@ def main(argv=None):
     parser.add_argument("--log-every", type=int, default=50)
     parser.add_argument("--save-every", type=int, default=5000)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--allow-flow-steps-change", action="store_true")
     args = parser.parse_args(argv)
     if (args.env_q == "fixed-iql") != (args.iql_checkpoint is not None):
         raise ValueError("Supply --iql-checkpoint exactly for --env-q fixed-iql")
@@ -122,7 +123,15 @@ def main(argv=None):
             k: v
             for k, v in serialized.items()
             if k
-            not in ("output_dir", "steps", "resume", "wandb_project", "log_every", "save_every")
+            not in (
+                "output_dir",
+                "steps",
+                "resume",
+                "wandb_project",
+                "log_every",
+                "save_every",
+                "allow_flow_steps_change",
+            )
         },
         "actor_manifest_sha256": hashlib.sha256(
             (args.actor_cache / "manifest.json").read_bytes()
@@ -133,7 +142,34 @@ def main(argv=None):
     }
     trainer = OfflineTrainer(algorithm, args.device, metadata=metadata)
     if args.resume:
-        trainer.load_checkpoint(args.resume)
+        if args.allow_flow_steps_change:
+            old = torch.load(args.resume, map_location="cpu", weights_only=False)
+            previous_metadata = old["metadata"]
+            comparable = json.loads(json.dumps(previous_metadata))
+            transitions = comparable.pop("flow_step_transitions", [])
+            old_steps = comparable["args"]["flow_steps"]
+            comparable["args"]["flow_steps"] = args.flow_steps
+            comparable["svf_config"]["flow_steps"] = args.flow_steps
+            if comparable != metadata:
+                raise ValueError("Only flow-step changes are permitted by this resume flag")
+            del old
+            trainer.metadata = previous_metadata
+            algorithm.config = replace(config, flow_steps=old_steps)
+            trainer.load_checkpoint(args.resume)
+            algorithm.config = config
+            if old_steps != args.flow_steps:
+                transitions = transitions + [
+                    {
+                        "step": trainer.step,
+                        "old": old_steps,
+                        "new": args.flow_steps,
+                        "source_checkpoint": str(args.resume),
+                    }
+                ]
+            metadata["flow_step_transitions"] = transitions
+            trainer.metadata = metadata
+        else:
+            trainer.load_checkpoint(args.resume)
     if args.steps <= trainer.step:
         raise ValueError("Target steps must exceed restored checkpoint")
     metrics_path = args.output_dir / "metrics.jsonl"

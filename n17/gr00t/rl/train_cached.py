@@ -20,6 +20,7 @@ from .trainer import OfflineTrainer
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--algorithm", choices=["iql", "deas"], default="iql")
+    parser.add_argument("--iql-encoder", choices=["none", "deas-mlp"], default="none")
     parser.add_argument("--discount1", type=float, default=0.9)
     parser.add_argument("--discount2", type=float, default=0.99)
     parser.add_argument("--cache", type=Path, required=True)
@@ -46,6 +47,8 @@ def main(argv=None):
         help="Trusted checkpoint from this cached trainer, not a live-VLM run",
     )
     args = parser.parse_args(argv)
+    if args.algorithm != "iql" and args.iql_encoder != "none":
+        raise ValueError("--iql-encoder applies only to scalar IQL")
     if (
         min(args.steps, args.batch_size, args.hidden_dim, args.hidden_layers, args.log_every) < 1
         or args.seed < 0
@@ -84,11 +87,18 @@ def main(argv=None):
         dataset = CachedFeatureDataset(args.cache, reward=args.reward, gamma=args.gamma)
         hidden = (args.hidden_dim,) * args.hidden_layers
         config = IQLConfig(args.learning_rate, args.expectile, args.target_tau)
-        learner = IQLCriticLearner(
-            FeatureCritic(dataset.feature_dim, dataset.action_shape, hidden).to(args.device),
-            FeatureValue(dataset.feature_dim, hidden).to(args.device),
-            config,
-        )
+        if args.iql_encoder == "deas-mlp":
+            from .projected_iql import ProjectedIQLQ, ProjectedIQLV, pooled_encoder
+
+            if dataset.feature_dim != 2212:
+                raise ValueError("DEAS-style IQL encoder requires N1.7 2048+132+32 features")
+            projection = pooled_encoder().to(args.device)
+            critic = ProjectedIQLQ(projection, dataset.feature_dim, dataset.action_shape, hidden)
+            value = ProjectedIQLV(projection, dataset.feature_dim, hidden)
+        else:
+            critic = FeatureCritic(dataset.feature_dim, dataset.action_shape, hidden)
+            value = FeatureValue(dataset.feature_dim, hidden)
+        learner = IQLCriticLearner(critic.to(args.device), value.to(args.device), config)
     semantic = {
         k: v
         for k, v in vars(args).items()
@@ -103,6 +113,8 @@ def main(argv=None):
             "save_every",
         ]
     }
+    if args.iql_encoder == "none":
+        semantic.pop("iql_encoder")  # Backwards-compatible checkpoint metadata.
     metadata = {
         "backend": "frozen-bc-cache-v1",
         "cache_manifest_sha256": hashlib.sha256(
@@ -148,7 +160,7 @@ def main(argv=None):
                 "trainable": (
                     "new DEAS projection, Q1/Q2 and residual V; BC frozen"
                     if args.algorithm == "deas"
-                    else "new Q1/Q2 and IQL V only; no BC model loaded"
+                    else "new Q1/Q2, IQL V and optional shared pooled encoder; no BC model loaded"
                 ),
             },
         )

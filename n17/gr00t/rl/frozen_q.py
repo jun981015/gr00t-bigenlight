@@ -261,7 +261,14 @@ def load_frozen_iql_q(
         critic = FrozenDEASQ(algorithm, feature_dim, action_mask.shape[1:], indices)
     else:
         hidden = (settings["hidden_dim"],) * settings["hidden_layers"]
-        critic = FeatureCritic(feature_dim, tuple(action_mask.shape[1:]), hidden)
+        if settings.get("iql_encoder", "none") == "deas-mlp":
+            from .projected_iql import ProjectedIQLQ, pooled_encoder
+
+            critic = ProjectedIQLQ(
+                pooled_encoder(), feature_dim, tuple(action_mask.shape[1:]), hidden
+            )
+        else:
+            critic = FeatureCritic(feature_dim, tuple(action_mask.shape[1:]), hidden)
         critic.load_state_dict(algorithm["critic"], strict=True)
     if not all(torch.isfinite(p).all() for p in critic.parameters()):
         raise ValueError("Nonfinite IQL Q weights")

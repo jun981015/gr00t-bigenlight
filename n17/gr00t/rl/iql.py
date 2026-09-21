@@ -41,7 +41,8 @@ class IQLCriticLearner:
     def __init__(self, critic, value, config=IQLConfig()):
         self.critic, self.value, self.config = critic, value, config
         self.target_critic = deepcopy(critic).requires_grad_(False).eval()
-        self.parameters = list(critic.parameters()) + list(value.parameters())
+        # Q and V may share a pooled-feature encoder. Optimize each weight once.
+        self.parameters = list(dict.fromkeys([*critic.parameters(), *value.parameters()]))
         self.optimizer = torch.optim.Adam(self.parameters, lr=config.learning_rate)
         self.updates = 0
 
