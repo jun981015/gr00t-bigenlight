@@ -1,5 +1,20 @@
 # DiT LoRA and reuse of the existing IQL cache
 
+## Shared SVF endpoint draws (2026-09-21)
+
+Temperature estimation and the inner soft-value target now share the same
+sampled time, noisy action anchor, SDE endpoints and endpoint Q scores. This
+intentionally replaces the previous independent Monte Carlo estimates.
+`lambda_batch_size` still limits the prefix of Q-score columns used for lambda;
+fixed `soft_lambda` remains unchanged. Both joint and inner-only modes use this.
+With 8 candidates and 10 flow steps, the second 80-call reference rollout is
+removed. Integration excludes completed rows from reference forward and stops
+when all rows reach t=1. Actor training and BC-loss logging still cost one DiT
+call each in joint fixed-Q mode (at most 82 total, often fewer).
+Existing checkpoints remain loadable, but resumed random draws and the lambda/
+target correlation differ from old runs. Already-running processes are not
+modified; this applies after a new launch. No GPU throughput claim is made.
+
 The existing `bigenlight-n17-*-bc10000-h16-v1` caches hold **pooled critic vectors**,
 normalized action chunks and transition metadata. They do not contain all VLM
 tokens. Freezing a projection does not restore information removed by pooling.

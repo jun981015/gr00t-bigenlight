@@ -211,8 +211,19 @@ class SoftValueFlow(FlowBC):
             for _ in range(self.config.candidates):
                 x, s = noisy.clone() * mask, time.clone()
                 for _ in range(self.config.flow_steps):
+                    active = s < 1
+                    if not active.any():
+                        break
                     ds = (1 - s).clamp(0, 1 / self.config.flow_steps)
-                    u = self.reference(observations, x, s).float() * mask
+                    # Finished rows never enter the DiT again, even when other
+                    # rows in this batch still need integration steps.
+                    u = torch.zeros_like(x, dtype=torch.float32)
+                    u[active] = self.reference(
+                        map_tensors(observations, lambda value: value[active]),
+                        x[active],
+                        s[active],
+                    ).float()
+                    u = u * mask
                     st, dt = s[:, None, None], ds[:, None, None]
                     drift = u - self.config.kappa**2 * (x - st * u) / st
                     noise = (
@@ -235,10 +246,15 @@ class SoftValueFlow(FlowBC):
         )
 
     @torch.no_grad()
-    def estimate_temperature(self, batch):
+    def estimate_temperature(self, batch, endpoint_q=None):
         if self.config.soft_lambda is not None:
             return batch.actions.new_tensor(self.config.soft_lambda)
         n = min(self.config.lambda_batch_size, batch.actions.shape[0])
+        if endpoint_q is not None:
+            # Reuse the inner target's exact draws; retain the configured
+            # lambda estimation sub-batch and detached population statistic.
+            spread = endpoint_q[:, :n].std(dim=0, correction=0).mean()
+            return (self.config.lambda_multiplier * spread.clamp_min(1e-3)).detach()
         observations = map_tensors(batch.observations, lambda x: x[:n])
         actions, mask = batch.actions[:n], batch.action_mask[:n]
         noise = torch.randn_like(actions) * mask
@@ -271,15 +287,15 @@ class SoftValueFlow(FlowBC):
             batch.action_mask,
             batch.observations,
         )
-        temperature = self.estimate_temperature(batch)
         outer_loss, td_target = self.outer_objective(batch, actions)
 
-        # Independent anchors/draws from temperature estimation.
+        # Share anchors, SDE endpoints and Q scores with temperature estimation.
         inner_time = actions.new_empty(actions.shape[0]).uniform_(self.config.t_min, 1)
         it = inner_time[:, None, None]
         inner_x = ((1 - it) * torch.randn_like(actions) + it * actions) * mask
         endpoints = self.base_sde_endpoints(obs, inner_x, inner_time, mask)
         q = self._endpoint_q(obs, endpoints)
+        temperature = self.estimate_temperature(batch, endpoint_q=q)
         inner_target = soft_value(q, temperature).detach()
         inner_prediction = aggregate_heads(
             self.inner_critic(obs, inner_x, inner_time), self.config.q_aggregation

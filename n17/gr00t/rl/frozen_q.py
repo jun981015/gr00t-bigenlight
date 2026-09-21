@@ -164,12 +164,12 @@ class FrozenQInnerOnly(FrozenQSoftValueFlow):
             batch.action_mask,
             batch.observations,
         )
-        temperature = self.estimate_temperature(batch)
         time = actions.new_empty(actions.shape[0]).uniform_(self.config.t_min, 1)
         t = time[:, None, None]
         noisy = ((1 - t) * torch.randn_like(actions) + t * actions) * mask
         endpoints = self.base_sde_endpoints(observations, noisy, time, mask)
         q = self._endpoint_q(observations, endpoints)
+        temperature = self.estimate_temperature(batch, endpoint_q=q)
         target = soft_value(q, temperature).detach()
         prediction = aggregate_heads(
             self.inner_critic(observations, noisy, time), self.config.q_aggregation

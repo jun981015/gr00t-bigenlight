@@ -122,7 +122,7 @@ def test_td_uses_complete_discount_without_second_gamma(monkeypatch):
     )
 
 
-def test_temperature_floor_and_independent_draws(monkeypatch):
+def test_temperature_floor_and_shared_draws(monkeypatch):
     model = agent()
     model.config = replace(model.config, soft_lambda=None, lambda_multiplier=4)
     seen = []
@@ -137,8 +137,69 @@ def test_temperature_floor_and_independent_draws(monkeypatch):
     data = batch()
     loss, info = model.losses(data)
     assert info["sv/lambda"].item() == pytest.approx(0.004)
-    assert len(seen) == 2 and not torch.equal(seen[0][0], seen[1][0])
+    assert len(seen) == 1
     assert torch.isfinite(loss)
+
+
+def test_temperature_reuses_q_subbatch_without_rollout(monkeypatch):
+    model = agent()
+    model.config = replace(model.config, soft_lambda=None, lambda_batch_size=2)
+
+    def forbidden(*args):
+        raise AssertionError("Unexpected second rollout")
+
+    monkeypatch.setattr(model, "base_sde_endpoints", forbidden)
+    q = torch.tensor([[0.0, 2.0, 100.0, 100.0], [2.0, 6.0, -100.0, -100.0]], requires_grad=True)
+    temperature = model.estimate_temperature(batch(), endpoint_q=q)
+    torch.testing.assert_close(temperature, torch.tensor(1.5))
+    assert not temperature.requires_grad
+
+
+def test_sde_never_forwards_completed_rows():
+    model = agent()
+    model.config = replace(model.config, flow_steps=10, candidates=2, kappa=0)
+    seen = []
+
+    def capture(module, args):
+        time = args[2]
+        assert (time < 1).all()
+        seen.append(len(time))
+
+    hook = model.reference.register_forward_pre_hook(capture)
+    data = batch()
+    times = torch.tensor([1.0, 0.95, 0.85, 1.0])
+    result = model.base_sde_endpoints(data.observations, data.actions, times, data.action_mask)
+    assert seen == [2, 1, 2, 1]
+    torch.testing.assert_close(result[:, 0], (data.actions * data.action_mask)[0].expand(2, -1, -1))
+    seen.clear()
+    model.base_sde_endpoints(data.observations, data.actions, torch.ones(4), data.action_mask)
+    assert seen == []
+    hook.remove()
+
+
+@pytest.mark.parametrize("inner_only", [False, True])
+def test_fixed_q_modes_share_temperature_rollout(monkeypatch, inner_only):
+    from gr00t.rl.frozen_q import FrozenQInnerOnly, FrozenQSoftValueFlow
+
+    source = agent()
+    cls = FrozenQInnerOnly if inner_only else FrozenQSoftValueFlow
+    model = cls(
+        source.actor,
+        source.critic,
+        source.inner_critic,
+        replace(source.config, soft_lambda=None, freeze_reference=True),
+    )
+    calls = []
+    original = model.base_sde_endpoints
+
+    def capture(*args):
+        calls.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(model, "base_sde_endpoints", capture)
+    metrics = model.update(batch())
+    assert calls == [1]
+    assert metrics["sv/lambda"] > 0
 
 
 @pytest.mark.parametrize(
